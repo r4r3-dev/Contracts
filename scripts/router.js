@@ -656,7 +656,8 @@ async function mainMenu() {
         console.log("4. Interact with Router");
         console.log("5. View All Deployments");
         console.log("6. Refresh Discovered Pairs and Oracles");
-        console.log("7. Exit");
+        console.log("7. Deploy All Possible Pairs");
+        console.log("8. Exit");
 
         const choice = await prompt("Choose an option: ");
 
@@ -683,11 +684,14 @@ async function mainMenu() {
                 await deployContracts();
                 console.log("Discovery complete.");
                 break;
-            case '7':
-                running = false;
-                break;
-            default:
-                console.log("Invalid option.");
+                case '7':
+                    await deployAllPossiblePairs();
+                    break;
+                case '8':
+                    running = false;
+                    break;
+                default:
+                    console.log("Invalid choice.");
         }
     }
     rl.close();
@@ -900,6 +904,58 @@ async function oracleSelectionMenu() {
 
         await oracleMenu(oracleAddresses[oracleIndex]);
     }
+}
+
+async function deployAllPossiblePairs() {
+    if (!factoryContract) {
+        console.error("Factory contract not deployed. Please deploy factory first.");
+        return;
+    }
+    if (Object.keys(tokens).length < 2) {
+        console.error("Insufficient tokens to create pairs. At least two tokens are required.");
+        return;
+    }
+
+    const tokenSymbols = Object.keys(tokens);
+    const totalPairs = (tokenSymbols.length * (tokenSymbols.length - 1)) / 2;
+    console.log(`\nPreparing to deploy ${totalPairs} possible pairs from ${tokenSymbols.length} tokens:`);
+    console.log(tokenSymbols.join(", "));
+    const confirm = await prompt(`Deploy all ${totalPairs} pairs? (y/n): `);
+    if (confirm.toLowerCase() !== 'y') {
+        console.log("Pair deployment cancelled.");
+        return;
+    }
+
+    let pairsCreated = 0;
+    for (let i = 0; i < tokenSymbols.length; i++) {
+        for (let j = i + 1; j < tokenSymbols.length; j++) {
+            const tokenA = tokens[tokenSymbols[i]].address;
+            const tokenB = tokens[tokenSymbols[j]].address;
+            console.log(`\nChecking pair ${tokenSymbols[i]}-${tokenSymbols[j]}...`);
+            try {
+                const pairAddress = await factoryContract.getPair(tokenA, tokenB);
+                if (pairAddress === ethers.ZeroAddress) {
+                    console.log(`Creating pair ${tokenSymbols[i]}-${tokenSymbols[j]}...`);
+                    await handleTransaction(
+                        user,
+                        factoryContract.createPair,
+                        [tokenA, tokenB],
+                        {},
+                        `CREATE_PAIR_${tokenSymbols[i]}_${tokenSymbols[j]}`
+                    );
+                    await updatePairInfoInDeployments(tokenA, tokenB);
+                    pairsCreated++;
+                } else {
+                    console.log(`Pair ${tokenSymbols[i]}-${tokenSymbols[j]} already exists at ${pairAddress}.`);
+                    await updatePairInfoInDeployments(tokenA, tokenB); // Ensure latest info
+                }
+            } catch (error) {
+                console.error(`Failed to process pair ${tokenSymbols[i]}-${tokenSymbols[j]}: ${error.message}`);
+            }
+        }
+    }
+    console.log(`\nPair deployment complete. Created ${pairsCreated} new pairs.`);
+    await saveDeploymentAddresses();
 }
 
 async function oracleMenu(oracleAddress) {
