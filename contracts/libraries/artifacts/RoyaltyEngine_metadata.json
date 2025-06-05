@@ -1,0 +1,98 @@
+{
+	"compiler": {
+		"version": "0.8.28+commit.7893614a"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [],
+				"name": "DEFAULT_ROYALTY_BASIS_POINTS",
+				"outputs": [
+					{
+						"internalType": "uint96",
+						"name": "",
+						"type": "uint96"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "MAX_ROYALTY_BASIS_POINTS",
+				"outputs": [
+					{
+						"internalType": "uint96",
+						"name": "",
+						"type": "uint96"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"details": "Helper to fetch ERC-2981 royalties or fallback to defaults.",
+			"kind": "dev",
+			"methods": {},
+			"title": "RoyaltyEngine",
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"contracts/libraries/RoyaltyEngine.sol": "RoyaltyEngine"
+		},
+		"evmVersion": "cancun",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": false,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"contracts/interfaces/IERC165.sol": {
+			"keccak256": "0x366df79a1e9f72d4dfa8cf2a5bad2982d442a0d1440517698d7cf8194e9f4023",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://9e80e4c37a57ec9a422eeea6ae895dc26b9d2eee0c72b03128f5166e9c5a6479",
+				"dweb:/ipfs/QmUotNg1bcM4nxinAa8dXY2C764dk2kCj9Jws8GZuRK6z4"
+			]
+		},
+		"contracts/interfaces/IERC2981.sol": {
+			"keccak256": "0x70c684083bb257ec070bca3da5e4a92d4e8fec542a671b13fb1753c97e5f5dfa",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://4882db7f9e18e78d70bb252ca8daabefee11c152ffa7c4a0350a5892089f23b5",
+				"dweb:/ipfs/QmckcTfs4y3LDphn8HeJvbF26HZFpfAwB7FnZ3hYjauNFb"
+			]
+		},
+		"contracts/libraries/ERC165Utils.sol": {
+			"keccak256": "0x50d74d15aed64d6d83f839b3af71a265e9ea236582c5d02b5c5e2f5197df3a1a",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://3f685eff4f01dbe48f41a26cf87bbe3c3bcb6ab60163be6d0bb646d6f1075bab",
+				"dweb:/ipfs/QmSN2NcLGNBTx7c7GaRSbGYPgX5YYBK79MiC1D6u1KxLC7"
+			]
+		},
+		"contracts/libraries/RoyaltyEngine.sol": {
+			"keccak256": "0x129b6580dec2786532352c14ceca6635a50f40d2bd088d4bb87e6f0558536a90",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://7bcf97648bcd7071e4e084fc23e47c8e0d0e57f34c70dd60010b2d5c9bde82de",
+				"dweb:/ipfs/QmaWPDVC2EE6mdJqjeuPboFmnAWy7G1SomW5irEdqTdAMz"
+			]
+		}
+	},
+	"version": 1
+}

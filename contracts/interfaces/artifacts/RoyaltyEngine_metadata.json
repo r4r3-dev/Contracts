@@ -1,0 +1,114 @@
+{
+	"compiler": {
+		"version": "0.8.28+commit.7893614a"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [],
+				"name": "DEFAULT_ROYALTY_BASIS_POINTS",
+				"outputs": [
+					{
+						"internalType": "uint96",
+						"name": "",
+						"type": "uint96"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "MAX_ROYALTY_BASIS_POINTS",
+				"outputs": [
+					{
+						"internalType": "uint96",
+						"name": "",
+						"type": "uint96"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"details": "Provides helper functions to calculate and retrieve royalty information. Supports ERC2981 standard. Includes fallback mechanism.",
+			"kind": "dev",
+			"methods": {},
+			"title": "RoyaltyEngine Library",
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"contracts/interfaces/IIERC20.sol": "RoyaltyEngine"
+		},
+		"evmVersion": "cancun",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": false,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"contracts/interfaces/IERC1155.sol": {
+			"keccak256": "0x613cd18a1c80f655bc20d3ba822c12a560625a9bc844f4d9928f24fcad772f11",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://b66bf28158ca3a297d4483d8fda506ec7a9859d293f09432c2fedf18c1b5346b",
+				"dweb:/ipfs/QmNb57xGjszjqmXSyBPkp3s3smDphhUrUdEt3XiCqX9BLU"
+			]
+		},
+		"contracts/interfaces/IERC165.sol": {
+			"keccak256": "0x366df79a1e9f72d4dfa8cf2a5bad2982d442a0d1440517698d7cf8194e9f4023",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://9e80e4c37a57ec9a422eeea6ae895dc26b9d2eee0c72b03128f5166e9c5a6479",
+				"dweb:/ipfs/QmUotNg1bcM4nxinAa8dXY2C764dk2kCj9Jws8GZuRK6z4"
+			]
+		},
+		"contracts/interfaces/IERC20.sol": {
+			"keccak256": "0xbbfa37dfcb0b5fb7949edd6674531ed855f4a1e676c6ead6bf67974456d3cda5",
+			"license": "UNLICENSED",
+			"urls": [
+				"bzz-raw://95d1f67f3515f29fe7cc60fa5f4ce0185acb56f234042d2669117f1be24fb02a",
+				"dweb:/ipfs/QmVmFmdAr52RwVKqdE3qMVxuuwj6PDaCq1aXUewpA7MWcH"
+			]
+		},
+		"contracts/interfaces/IERC2981.sol": {
+			"keccak256": "0x70c684083bb257ec070bca3da5e4a92d4e8fec542a671b13fb1753c97e5f5dfa",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://4882db7f9e18e78d70bb252ca8daabefee11c152ffa7c4a0350a5892089f23b5",
+				"dweb:/ipfs/QmckcTfs4y3LDphn8HeJvbF26HZFpfAwB7FnZ3hYjauNFb"
+			]
+		},
+		"contracts/interfaces/IERC721.sol": {
+			"keccak256": "0x681dd08c8e16e021b5a6e3f93c63c3602878fbb0c257fb1461ca0848488722c7",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://5406ff40083f100737e04c00328291ad1e43a4458d45958db5d850e777fa67d6",
+				"dweb:/ipfs/QmQai1wLveHJxDnkgCisAwe3ShUz9qxKRphFVRmEZyWuN5"
+			]
+		},
+		"contracts/interfaces/IIERC20.sol": {
+			"keccak256": "0xfa79cf239824256c467706a725072c90324ccf3ae72b413e5dbfd042a28c2334",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://c2a769ff0aad64bcc893df257f16c1d83c75e8802726ebb240ab8c8a42c560c7",
+				"dweb:/ipfs/QmbDQp9XVYrUJgaDuJi9shdgmxSgUs6vu6L1QJ9NnuztWZ"
+			]
+		}
+	},
+	"version": 1
+}

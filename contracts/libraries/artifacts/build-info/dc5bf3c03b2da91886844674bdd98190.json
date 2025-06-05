@@ -1,0 +1,4688 @@
+{
+	"id": "dc5bf3c03b2da91886844674bdd98190",
+	"_format": "hh-sol-build-info-1",
+	"solcVersion": "0.8.28",
+	"solcLongVersion": "0.8.28+commit.7893614a",
+	"input": {
+		"language": "Solidity",
+		"sources": {
+			"contracts/libraries/RoyaltyEngine.sol": {
+				"content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.20;\r\n\r\nimport \"../libraries/ERC165Utils.sol\";\r\nimport \"../interfaces/IERC2981.sol\";\r\n\r\n/// @title  RoyaltyEngine\r\n/// @dev    Helper to fetch ERC-2981 royalties or fallback to defaults.\r\nlibrary RoyaltyEngine {\r\n    // ERC-2981 interface ID\r\n    bytes4 private constant _INTERFACE_ID_ERC2981 = type(IERC2981).interfaceId;\r\n\r\n    // Default fallback royalty = 5% (500 / 10000)\r\n    uint96 public constant DEFAULT_ROYALTY_BASIS_POINTS = 500;\r\n    uint96 public constant MAX_ROYALTY_BASIS_POINTS     = 10000;\r\n\r\n    struct RoyaltyInfo {\r\n        address receiver;\r\n        uint256 amount;\r\n    }\r\n\r\n    /**\r\n     * @notice Get royalty info for a sale.\r\n     * @param nftContract       Collection contract address.\r\n     * @param tokenId           Token ID being sold.\r\n     * @param salePrice         Total sale price.\r\n     * @param defaultReceiver   Who to pay if no ERC-2981 support.\r\n     */\r\n    function getRoyalty(\r\n        address nftContract,\r\n        uint256 tokenId,\r\n        uint256 salePrice,\r\n        address defaultReceiver\r\n    ) internal view returns (RoyaltyInfo memory info) {\r\n        // 1) Check ERC-2981 support on-chain (no try/catch needed here)\r\n        bool supportsRoyalty = ERC165Utils.supportsInterface(nftContract, _INTERFACE_ID_ERC2981);\r\n\r\n        // 2) If supported, try reading the on-chain royalty\r\n        if (supportsRoyalty) {\r\n            try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (\r\n                address receiver,\r\n                uint256 royaltyAmount\r\n            ) {\r\n                // Only accept non-zero receiver & amount ≤ salePrice\r\n                if (receiver != address(0) && royaltyAmount > 0 && royaltyAmount <= salePrice) {\r\n                    info.receiver = receiver;\r\n                    info.amount   = royaltyAmount;\r\n                    return info;\r\n                }\r\n            } catch {\r\n                // swallow reverts and fallback below\r\n            }\r\n        }\r\n\r\n        // 3) Fallback: default % to the defaultReceiver\r\n        info.receiver = defaultReceiver;\r\n        // defaultReceiver==0 → amount zeroed out\r\n        if (defaultReceiver != address(0)) {\r\n            info.amount = (salePrice * DEFAULT_ROYALTY_BASIS_POINTS) / MAX_ROYALTY_BASIS_POINTS;\r\n        }\r\n        return info;\r\n    }\r\n}\r\n"
+			},
+			"contracts/interfaces/IERC2981.sol": {
+				"content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.20;\r\nimport {IERC165} from './IERC165.sol';\r\n\r\n/**\r\n * @title Minimal IERC2981 Royalty Standard interface\r\n * @dev See https://eips.ethereum.org/EIPS/eip-2981\r\n */\r\ninterface IERC2981 is IERC165 {\r\n    /**\r\n     * @dev Called with the sale price to determine how much royalty is owed and to whom.\r\n     * @param tokenId - the NFT asset queried for royalty information\r\n     * @param salePrice - the sale price of the NFT asset specified by `tokenId`\r\n     * @return receiver - address of who should receive the royalties.\r\n     * @return royaltyAmount - the royalty amount calculated given the `salePrice`.\r\n     */\r\n    function royaltyInfo(uint256 tokenId, uint256 salePrice) external view returns (address receiver, uint256 royaltyAmount);\r\n}"
+			},
+			"contracts/libraries/ERC165Utils.sol": {
+				"content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.20;\r\n\r\nlibrary ERC165Utils {\r\n    function supportsInterface(address account, bytes4 interfaceId) internal view returns (bool) {\r\n        (bool success, bytes memory result) = account.staticcall{gas: 30000}(\r\n            abi.encodeWithSelector(0x01ffc9a7, interfaceId) // ERC165 interface ID\r\n        );\r\n        if (!success || result.length < 32) return false;\r\n        return abi.decode(result, (bool));\r\n    }\r\n}\r\n"
+			},
+			"contracts/interfaces/IERC165.sol": {
+				"content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.20;\r\n\r\n/**\r\n * @title Minimal IERC165 interface\r\n * @dev Interface of the ERC165 standard, as defined in the EIP.\r\n */\r\ninterface IERC165 {\r\n    /**\r\n     * @dev Returns true if this contract implements the interface defined by\r\n     * `interfaceId`. See the corresponding\r\n     * https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section]\r\n     * to learn more about how these ids are created.\r\n     *\r\n     * This function call must use less than 30 000 gas.\r\n     */\r\n    function supportsInterface(bytes4 interfaceId) external view returns (bool);\r\n}"
+			}
+		},
+		"settings": {
+			"optimizer": {
+				"enabled": false,
+				"runs": 200
+			},
+			"outputSelection": {
+				"*": {
+					"": [
+						"ast"
+					],
+					"*": [
+						"abi",
+						"metadata",
+						"devdoc",
+						"userdoc",
+						"storageLayout",
+						"evm.legacyAssembly",
+						"evm.bytecode",
+						"evm.deployedBytecode",
+						"evm.methodIdentifiers",
+						"evm.gasEstimates",
+						"evm.assembly"
+					]
+				}
+			},
+			"remappings": []
+		}
+	},
+	"output": {
+		"contracts": {
+			"contracts/interfaces/IERC165.sol": {
+				"IERC165": {
+					"abi": [
+						{
+							"inputs": [
+								{
+									"internalType": "bytes4",
+									"name": "interfaceId",
+									"type": "bytes4"
+								}
+							],
+							"name": "supportsInterface",
+							"outputs": [
+								{
+									"internalType": "bool",
+									"name": "",
+									"type": "bool"
+								}
+							],
+							"stateMutability": "view",
+							"type": "function"
+						}
+					],
+					"devdoc": {
+						"details": "Interface of the ERC165 standard, as defined in the EIP.",
+						"kind": "dev",
+						"methods": {
+							"supportsInterface(bytes4)": {
+								"details": "Returns true if this contract implements the interface defined by `interfaceId`. See the corresponding https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section] to learn more about how these ids are created. This function call must use less than 30 000 gas."
+							}
+						},
+						"title": "Minimal IERC165 interface",
+						"version": 1
+					},
+					"evm": {
+						"assembly": "",
+						"bytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"linkReferences": {},
+							"object": "",
+							"opcodes": "",
+							"sourceMap": ""
+						},
+						"deployedBytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"immutableReferences": {},
+							"linkReferences": {},
+							"object": "",
+							"opcodes": "",
+							"sourceMap": ""
+						},
+						"gasEstimates": null,
+						"legacyAssembly": null,
+						"methodIdentifiers": {
+							"supportsInterface(bytes4)": "01ffc9a7"
+						}
+					},
+					"metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"bytes4\",\"name\":\"interfaceId\",\"type\":\"bytes4\"}],\"name\":\"supportsInterface\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"Interface of the ERC165 standard, as defined in the EIP.\",\"kind\":\"dev\",\"methods\":{\"supportsInterface(bytes4)\":{\"details\":\"Returns true if this contract implements the interface defined by `interfaceId`. See the corresponding https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section] to learn more about how these ids are created. This function call must use less than 30 000 gas.\"}},\"title\":\"Minimal IERC165 interface\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/interfaces/IERC165.sol\":\"IERC165\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"contracts/interfaces/IERC165.sol\":{\"keccak256\":\"0x366df79a1e9f72d4dfa8cf2a5bad2982d442a0d1440517698d7cf8194e9f4023\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://9e80e4c37a57ec9a422eeea6ae895dc26b9d2eee0c72b03128f5166e9c5a6479\",\"dweb:/ipfs/QmUotNg1bcM4nxinAa8dXY2C764dk2kCj9Jws8GZuRK6z4\"]}},\"version\":1}",
+					"storageLayout": {
+						"storage": [],
+						"types": null
+					},
+					"userdoc": {
+						"kind": "user",
+						"methods": {},
+						"version": 1
+					}
+				}
+			},
+			"contracts/interfaces/IERC2981.sol": {
+				"IERC2981": {
+					"abi": [
+						{
+							"inputs": [
+								{
+									"internalType": "uint256",
+									"name": "tokenId",
+									"type": "uint256"
+								},
+								{
+									"internalType": "uint256",
+									"name": "salePrice",
+									"type": "uint256"
+								}
+							],
+							"name": "royaltyInfo",
+							"outputs": [
+								{
+									"internalType": "address",
+									"name": "receiver",
+									"type": "address"
+								},
+								{
+									"internalType": "uint256",
+									"name": "royaltyAmount",
+									"type": "uint256"
+								}
+							],
+							"stateMutability": "view",
+							"type": "function"
+						},
+						{
+							"inputs": [
+								{
+									"internalType": "bytes4",
+									"name": "interfaceId",
+									"type": "bytes4"
+								}
+							],
+							"name": "supportsInterface",
+							"outputs": [
+								{
+									"internalType": "bool",
+									"name": "",
+									"type": "bool"
+								}
+							],
+							"stateMutability": "view",
+							"type": "function"
+						}
+					],
+					"devdoc": {
+						"details": "See https://eips.ethereum.org/EIPS/eip-2981",
+						"kind": "dev",
+						"methods": {
+							"royaltyInfo(uint256,uint256)": {
+								"details": "Called with the sale price to determine how much royalty is owed and to whom.",
+								"params": {
+									"salePrice": "- the sale price of the NFT asset specified by `tokenId`",
+									"tokenId": "- the NFT asset queried for royalty information"
+								},
+								"returns": {
+									"receiver": "- address of who should receive the royalties.",
+									"royaltyAmount": "- the royalty amount calculated given the `salePrice`."
+								}
+							},
+							"supportsInterface(bytes4)": {
+								"details": "Returns true if this contract implements the interface defined by `interfaceId`. See the corresponding https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section] to learn more about how these ids are created. This function call must use less than 30 000 gas."
+							}
+						},
+						"title": "Minimal IERC2981 Royalty Standard interface",
+						"version": 1
+					},
+					"evm": {
+						"assembly": "",
+						"bytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"linkReferences": {},
+							"object": "",
+							"opcodes": "",
+							"sourceMap": ""
+						},
+						"deployedBytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"immutableReferences": {},
+							"linkReferences": {},
+							"object": "",
+							"opcodes": "",
+							"sourceMap": ""
+						},
+						"gasEstimates": null,
+						"legacyAssembly": null,
+						"methodIdentifiers": {
+							"royaltyInfo(uint256,uint256)": "2a55205a",
+							"supportsInterface(bytes4)": "01ffc9a7"
+						}
+					},
+					"metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"tokenId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"salePrice\",\"type\":\"uint256\"}],\"name\":\"royaltyInfo\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"receiver\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"royaltyAmount\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes4\",\"name\":\"interfaceId\",\"type\":\"bytes4\"}],\"name\":\"supportsInterface\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"See https://eips.ethereum.org/EIPS/eip-2981\",\"kind\":\"dev\",\"methods\":{\"royaltyInfo(uint256,uint256)\":{\"details\":\"Called with the sale price to determine how much royalty is owed and to whom.\",\"params\":{\"salePrice\":\"- the sale price of the NFT asset specified by `tokenId`\",\"tokenId\":\"- the NFT asset queried for royalty information\"},\"returns\":{\"receiver\":\"- address of who should receive the royalties.\",\"royaltyAmount\":\"- the royalty amount calculated given the `salePrice`.\"}},\"supportsInterface(bytes4)\":{\"details\":\"Returns true if this contract implements the interface defined by `interfaceId`. See the corresponding https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section] to learn more about how these ids are created. This function call must use less than 30 000 gas.\"}},\"title\":\"Minimal IERC2981 Royalty Standard interface\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/interfaces/IERC2981.sol\":\"IERC2981\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"contracts/interfaces/IERC165.sol\":{\"keccak256\":\"0x366df79a1e9f72d4dfa8cf2a5bad2982d442a0d1440517698d7cf8194e9f4023\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://9e80e4c37a57ec9a422eeea6ae895dc26b9d2eee0c72b03128f5166e9c5a6479\",\"dweb:/ipfs/QmUotNg1bcM4nxinAa8dXY2C764dk2kCj9Jws8GZuRK6z4\"]},\"contracts/interfaces/IERC2981.sol\":{\"keccak256\":\"0x70c684083bb257ec070bca3da5e4a92d4e8fec542a671b13fb1753c97e5f5dfa\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://4882db7f9e18e78d70bb252ca8daabefee11c152ffa7c4a0350a5892089f23b5\",\"dweb:/ipfs/QmckcTfs4y3LDphn8HeJvbF26HZFpfAwB7FnZ3hYjauNFb\"]}},\"version\":1}",
+					"storageLayout": {
+						"storage": [],
+						"types": null
+					},
+					"userdoc": {
+						"kind": "user",
+						"methods": {},
+						"version": 1
+					}
+				}
+			},
+			"contracts/libraries/ERC165Utils.sol": {
+				"ERC165Utils": {
+					"abi": [],
+					"devdoc": {
+						"kind": "dev",
+						"methods": {},
+						"version": 1
+					},
+					"evm": {
+						"assembly": "    /* \"contracts/libraries/ERC165Utils.sol\":61:470  library ERC165Utils {... */\n  dataSize(sub_0)\n  dataOffset(sub_0)\n  0x0b\n  dup3\n  dup3\n  dup3\n  codecopy\n  dup1\n  mload\n  0x00\n  byte\n  0x73\n  eq\n  tag_1\n  jumpi\n  mstore(0x00, 0x4e487b7100000000000000000000000000000000000000000000000000000000)\n  mstore(0x04, 0x00)\n  revert(0x00, 0x24)\ntag_1:\n  mstore(0x00, address)\n  0x73\n  dup2\n  mstore8\n  dup3\n  dup2\n  return\nstop\n\nsub_0: assembly {\n        /* \"contracts/libraries/ERC165Utils.sol\":61:470  library ERC165Utils {... */\n      eq(address, deployTimeAddress())\n      mstore(0x40, 0x80)\n      revert(0x00, 0x00)\n\n    auxdata: 0xa2646970667358221220ef4404a73ec612bffba222e795d1be701770f73c69c0bc47d698ca65080fdcf264736f6c634300081c0033\n}\n",
+						"bytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"linkReferences": {},
+							"object": "6055604b600b8282823980515f1a607314603f577f4e487b71000000000000000000000000000000000000000000000000000000005f525f60045260245ffd5b305f52607381538281f3fe730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220ef4404a73ec612bffba222e795d1be701770f73c69c0bc47d698ca65080fdcf264736f6c634300081c0033",
+							"opcodes": "PUSH1 0x55 PUSH1 0x4B PUSH1 0xB DUP3 DUP3 DUP3 CODECOPY DUP1 MLOAD PUSH0 BYTE PUSH1 0x73 EQ PUSH1 0x3F JUMPI PUSH32 0x4E487B7100000000000000000000000000000000000000000000000000000000 PUSH0 MSTORE PUSH0 PUSH1 0x4 MSTORE PUSH1 0x24 PUSH0 REVERT JUMPDEST ADDRESS PUSH0 MSTORE PUSH1 0x73 DUP2 MSTORE8 DUP3 DUP2 RETURN INVALID PUSH20 0x0 ADDRESS EQ PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 PUSH0 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 0xEF PREVRANDAO DIV 0xA7 RETURNDATACOPY 0xC6 SLT 0xBF 0xFB LOG2 0x22 0xE7 SWAP6 0xD1 0xBE PUSH17 0x1770F73C69C0BC47D698CA65080FDCF264 PUSH20 0x6F6C634300081C00330000000000000000000000 ",
+							"sourceMap": "61:409:2:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"
+						},
+						"deployedBytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"immutableReferences": {},
+							"linkReferences": {},
+							"object": "730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220ef4404a73ec612bffba222e795d1be701770f73c69c0bc47d698ca65080fdcf264736f6c634300081c0033",
+							"opcodes": "PUSH20 0x0 ADDRESS EQ PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 PUSH0 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 0xEF PREVRANDAO DIV 0xA7 RETURNDATACOPY 0xC6 SLT 0xBF 0xFB LOG2 0x22 0xE7 SWAP6 0xD1 0xBE PUSH17 0x1770F73C69C0BC47D698CA65080FDCF264 PUSH20 0x6F6C634300081C00330000000000000000000000 ",
+							"sourceMap": "61:409:2:-:0;;;;;;;;"
+						},
+						"gasEstimates": {
+							"creation": {
+								"codeDepositCost": "17000",
+								"executionCost": "92",
+								"totalCost": "17092"
+							},
+							"internal": {
+								"supportsInterface(address,bytes4)": "infinite"
+							}
+						},
+						"legacyAssembly": {
+							".code": [
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH #[$]",
+									"source": 2,
+									"value": "0000000000000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH [$]",
+									"source": 2,
+									"value": "0000000000000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "B"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP3",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP3",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP3",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "CODECOPY",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP1",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "MLOAD",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "0"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "BYTE",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "73"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "EQ",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH [tag]",
+									"source": 2,
+									"value": "1"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "JUMPI",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "4E487B7100000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "0"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "MSTORE",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "0"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "4"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "MSTORE",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "24"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "0"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "REVERT",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "tag",
+									"source": 2,
+									"value": "1"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "JUMPDEST",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "ADDRESS",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "0"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "MSTORE",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "PUSH",
+									"source": 2,
+									"value": "73"
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP2",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "MSTORE8",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP3",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "DUP2",
+									"source": 2
+								},
+								{
+									"begin": 61,
+									"end": 470,
+									"name": "RETURN",
+									"source": 2
+								}
+							],
+							".data": {
+								"0": {
+									".auxdata": "a2646970667358221220ef4404a73ec612bffba222e795d1be701770f73c69c0bc47d698ca65080fdcf264736f6c634300081c0033",
+									".code": [
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "PUSHDEPLOYADDRESS",
+											"source": 2
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "ADDRESS",
+											"source": 2
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "EQ",
+											"source": 2
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "PUSH",
+											"source": 2,
+											"value": "80"
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "PUSH",
+											"source": 2,
+											"value": "40"
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "MSTORE",
+											"source": 2
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "PUSH",
+											"source": 2,
+											"value": "0"
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "PUSH",
+											"source": 2,
+											"value": "0"
+										},
+										{
+											"begin": 61,
+											"end": 470,
+											"name": "REVERT",
+											"source": 2
+										}
+									]
+								}
+							},
+							"sourceList": [
+								"contracts/interfaces/IERC165.sol",
+								"contracts/interfaces/IERC2981.sol",
+								"contracts/libraries/ERC165Utils.sol",
+								"contracts/libraries/RoyaltyEngine.sol",
+								"#utility.yul"
+							]
+						},
+						"methodIdentifiers": {}
+					},
+					"metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/libraries/ERC165Utils.sol\":\"ERC165Utils\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"contracts/libraries/ERC165Utils.sol\":{\"keccak256\":\"0x50d74d15aed64d6d83f839b3af71a265e9ea236582c5d02b5c5e2f5197df3a1a\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://3f685eff4f01dbe48f41a26cf87bbe3c3bcb6ab60163be6d0bb646d6f1075bab\",\"dweb:/ipfs/QmSN2NcLGNBTx7c7GaRSbGYPgX5YYBK79MiC1D6u1KxLC7\"]}},\"version\":1}",
+					"storageLayout": {
+						"storage": [],
+						"types": null
+					},
+					"userdoc": {
+						"kind": "user",
+						"methods": {},
+						"version": 1
+					}
+				}
+			},
+			"contracts/libraries/RoyaltyEngine.sol": {
+				"RoyaltyEngine": {
+					"abi": [
+						{
+							"inputs": [],
+							"name": "DEFAULT_ROYALTY_BASIS_POINTS",
+							"outputs": [
+								{
+									"internalType": "uint96",
+									"name": "",
+									"type": "uint96"
+								}
+							],
+							"stateMutability": "view",
+							"type": "function"
+						},
+						{
+							"inputs": [],
+							"name": "MAX_ROYALTY_BASIS_POINTS",
+							"outputs": [
+								{
+									"internalType": "uint96",
+									"name": "",
+									"type": "uint96"
+								}
+							],
+							"stateMutability": "view",
+							"type": "function"
+						}
+					],
+					"devdoc": {
+						"details": "Helper to fetch ERC-2981 royalties or fallback to defaults.",
+						"kind": "dev",
+						"methods": {},
+						"title": "RoyaltyEngine",
+						"version": 1
+					},
+					"evm": {
+						"assembly": "    /* \"contracts/libraries/RoyaltyEngine.sol\":241:2356  library RoyaltyEngine {... */\n  dataSize(sub_0)\n  dataOffset(sub_0)\n  0x0b\n  dup3\n  dup3\n  dup3\n  codecopy\n  dup1\n  mload\n  0x00\n  byte\n  0x73\n  eq\n  tag_1\n  jumpi\n  mstore(0x00, 0x4e487b7100000000000000000000000000000000000000000000000000000000)\n  mstore(0x04, 0x00)\n  revert(0x00, 0x24)\ntag_1:\n  mstore(0x00, address)\n  0x73\n  dup2\n  mstore8\n  dup3\n  dup2\n  return\nstop\n\nsub_0: assembly {\n        /* \"contracts/libraries/RoyaltyEngine.sol\":241:2356  library RoyaltyEngine {... */\n      eq(address, deployTimeAddress())\n      mstore(0x40, 0x80)\n      jumpi(tag_1, lt(calldatasize, 0x04))\n      shr(0xe0, calldataload(0x00))\n      dup1\n      0x1ccff3f5\n      eq\n      tag_2\n      jumpi\n      dup1\n      0xb1c0c80a\n      eq\n      tag_3\n      jumpi\n    tag_1:\n      revert(0x00, 0x00)\n        /* \"contracts/libraries/RoyaltyEngine.sol\":499:558  uint96 public constant MAX_ROYALTY_BASIS_POINTS     = 10000 */\n    tag_2:\n      tag_4\n      tag_5\n      jump\t// in\n    tag_4:\n      mload(0x40)\n      tag_6\n      swap2\n      swap1\n      tag_7\n      jump\t// in\n    tag_6:\n      mload(0x40)\n      dup1\n      swap2\n      sub\n      swap1\n      return\n        /* \"contracts/libraries/RoyaltyEngine.sol\":435:492  uint96 public constant DEFAULT_ROYALTY_BASIS_POINTS = 500 */\n    tag_3:\n      tag_8\n      tag_9\n      jump\t// in\n    tag_8:\n      mload(0x40)\n      tag_10\n      swap2\n      swap1\n      tag_7\n      jump\t// in\n    tag_10:\n      mload(0x40)\n      dup1\n      swap2\n      sub\n      swap1\n      return\n        /* \"contracts/libraries/RoyaltyEngine.sol\":499:558  uint96 public constant MAX_ROYALTY_BASIS_POINTS     = 10000 */\n    tag_5:\n        /* \"contracts/libraries/RoyaltyEngine.sol\":553:558  10000 */\n      0x2710\n        /* \"contracts/libraries/RoyaltyEngine.sol\":499:558  uint96 public constant MAX_ROYALTY_BASIS_POINTS     = 10000 */\n      dup2\n      jump\t// out\n        /* \"contracts/libraries/RoyaltyEngine.sol\":435:492  uint96 public constant DEFAULT_ROYALTY_BASIS_POINTS = 500 */\n    tag_9:\n        /* \"contracts/libraries/RoyaltyEngine.sol\":489:492  500 */\n      0x01f4\n        /* \"contracts/libraries/RoyaltyEngine.sol\":435:492  uint96 public constant DEFAULT_ROYALTY_BASIS_POINTS = 500 */\n      dup2\n      jump\t// out\n        /* \"#utility.yul\":7:116   */\n    tag_11:\n        /* \"#utility.yul\":43:50   */\n      0x00\n        /* \"#utility.yul\":83:109   */\n      0xffffffffffffffffffffffff\n        /* \"#utility.yul\":76:81   */\n      dup3\n        /* \"#utility.yul\":72:110   */\n      and\n        /* \"#utility.yul\":61:110   */\n      swap1\n      pop\n        /* \"#utility.yul\":7:116   */\n      swap2\n      swap1\n      pop\n      jump\t// out\n        /* \"#utility.yul\":122:245   */\n    tag_12:\n        /* \"#utility.yul\":215:238   */\n      tag_16\n        /* \"#utility.yul\":232:237   */\n      dup2\n        /* \"#utility.yul\":215:238   */\n      tag_11\n      jump\t// in\n    tag_16:\n        /* \"#utility.yul\":210:213   */\n      dup3\n        /* \"#utility.yul\":203:239   */\n      mstore\n        /* \"#utility.yul\":122:245   */\n      pop\n      pop\n      jump\t// out\n        /* \"#utility.yul\":251:485   */\n    tag_7:\n        /* \"#utility.yul\":350:354   */\n      0x00\n        /* \"#utility.yul\":388:390   */\n      0x20\n        /* \"#utility.yul\":377:386   */\n      dup3\n        /* \"#utility.yul\":373:391   */\n      add\n        /* \"#utility.yul\":365:391   */\n      swap1\n      pop\n        /* \"#utility.yul\":401:478   */\n      tag_18\n        /* \"#utility.yul\":475:476   */\n      0x00\n        /* \"#utility.yul\":464:473   */\n      dup4\n        /* \"#utility.yul\":460:477   */\n      add\n        /* \"#utility.yul\":451:457   */\n      dup5\n        /* \"#utility.yul\":401:478   */\n      tag_12\n      jump\t// in\n    tag_18:\n        /* \"#utility.yul\":251:485   */\n      swap3\n      swap2\n      pop\n      pop\n      jump\t// out\n\n    auxdata: 0xa26469706673582212205add5eded0f9a21d18ef512bf3766d3cecc25911d3414461e5ad0d8b6d49fa1d64736f6c634300081c0033\n}\n",
+						"bytecode": {
+							"functionDebugData": {},
+							"generatedSources": [],
+							"linkReferences": {},
+							"object": "60f161004c600b8282823980515f1a6073146040577f4e487b71000000000000000000000000000000000000000000000000000000005f525f60045260245ffd5b305f52607381538281f3fe7300000000000000000000000000000000000000003014608060405260043610603c575f3560e01c80631ccff3f5146040578063b1c0c80a14605a575b5f5ffd5b60466074565b6040516051919060a4565b60405180910390f35b6060607a565b604051606b919060a4565b60405180910390f35b61271081565b6101f481565b5f6bffffffffffffffffffffffff82169050919050565b609e816080565b82525050565b5f60208201905060b55f8301846097565b9291505056fea26469706673582212205add5eded0f9a21d18ef512bf3766d3cecc25911d3414461e5ad0d8b6d49fa1d64736f6c634300081c0033",
+							"opcodes": "PUSH1 0xF1 PUSH2 0x4C PUSH1 0xB DUP3 DUP3 DUP3 CODECOPY DUP1 MLOAD PUSH0 BYTE PUSH1 0x73 EQ PUSH1 0x40 JUMPI PUSH32 0x4E487B7100000000000000000000000000000000000000000000000000000000 PUSH0 MSTORE PUSH0 PUSH1 0x4 MSTORE PUSH1 0x24 PUSH0 REVERT JUMPDEST ADDRESS PUSH0 MSTORE PUSH1 0x73 DUP2 MSTORE8 DUP3 DUP2 RETURN INVALID PUSH20 0x0 ADDRESS EQ PUSH1 0x80 PUSH1 0x40 MSTORE PUSH1 0x4 CALLDATASIZE LT PUSH1 0x3C JUMPI PUSH0 CALLDATALOAD PUSH1 0xE0 SHR DUP1 PUSH4 0x1CCFF3F5 EQ PUSH1 0x40 JUMPI DUP1 PUSH4 0xB1C0C80A EQ PUSH1 0x5A JUMPI JUMPDEST PUSH0 PUSH0 REVERT JUMPDEST PUSH1 0x46 PUSH1 0x74 JUMP JUMPDEST PUSH1 0x40 MLOAD PUSH1 0x51 SWAP2 SWAP1 PUSH1 0xA4 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST PUSH1 0x60 PUSH1 0x7A JUMP JUMPDEST PUSH1 0x40 MLOAD PUSH1 0x6B SWAP2 SWAP1 PUSH1 0xA4 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST PUSH2 0x2710 DUP2 JUMP JUMPDEST PUSH2 0x1F4 DUP2 JUMP JUMPDEST PUSH0 PUSH12 0xFFFFFFFFFFFFFFFFFFFFFFFF DUP3 AND SWAP1 POP SWAP2 SWAP1 POP JUMP JUMPDEST PUSH1 0x9E DUP2 PUSH1 0x80 JUMP JUMPDEST DUP3 MSTORE POP POP JUMP JUMPDEST PUSH0 PUSH1 0x20 DUP3 ADD SWAP1 POP PUSH1 0xB5 PUSH0 DUP4 ADD DUP5 PUSH1 0x97 JUMP JUMPDEST SWAP3 SWAP2 POP POP JUMP INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 GAS 0xDD MCOPY 0xDE 0xD0 0xF9 LOG2 SAR XOR 0xEF MLOAD 0x2B RETURN PUSH23 0x6D3CECC25911D3414461E5AD0D8B6D49FA1D64736F6C63 NUMBER STOP ADDMOD SHR STOP CALLER ",
+							"sourceMap": "241:2115:3:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"
+						},
+						"deployedBytecode": {
+							"functionDebugData": {
+								"@DEFAULT_ROYALTY_BASIS_POINTS_91": {
+									"entryPoint": 122,
+									"id": 91,
+									"parameterSlots": 0,
+									"returnSlots": 0
+								},
+								"@MAX_ROYALTY_BASIS_POINTS_94": {
+									"entryPoint": 116,
+									"id": 94,
+									"parameterSlots": 0,
+									"returnSlots": 0
+								},
+								"abi_encode_t_uint96_to_t_uint96_fromStack_library": {
+									"entryPoint": 151,
+									"id": null,
+									"parameterSlots": 2,
+									"returnSlots": 0
+								},
+								"abi_encode_tuple_t_uint96__to_t_uint96__fromStack_library_reversed": {
+									"entryPoint": 164,
+									"id": null,
+									"parameterSlots": 2,
+									"returnSlots": 1
+								},
+								"cleanup_t_uint96": {
+									"entryPoint": 128,
+									"id": null,
+									"parameterSlots": 1,
+									"returnSlots": 1
+								}
+							},
+							"generatedSources": [
+								{
+									"ast": {
+										"nativeSrc": "0:488:4",
+										"nodeType": "YulBlock",
+										"src": "0:488:4",
+										"statements": [
+											{
+												"body": {
+													"nativeSrc": "51:65:4",
+													"nodeType": "YulBlock",
+													"src": "51:65:4",
+													"statements": [
+														{
+															"nativeSrc": "61:49:4",
+															"nodeType": "YulAssignment",
+															"src": "61:49:4",
+															"value": {
+																"arguments": [
+																	{
+																		"name": "value",
+																		"nativeSrc": "76:5:4",
+																		"nodeType": "YulIdentifier",
+																		"src": "76:5:4"
+																	},
+																	{
+																		"kind": "number",
+																		"nativeSrc": "83:26:4",
+																		"nodeType": "YulLiteral",
+																		"src": "83:26:4",
+																		"type": "",
+																		"value": "0xffffffffffffffffffffffff"
+																	}
+																],
+																"functionName": {
+																	"name": "and",
+																	"nativeSrc": "72:3:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "72:3:4"
+																},
+																"nativeSrc": "72:38:4",
+																"nodeType": "YulFunctionCall",
+																"src": "72:38:4"
+															},
+															"variableNames": [
+																{
+																	"name": "cleaned",
+																	"nativeSrc": "61:7:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "61:7:4"
+																}
+															]
+														}
+													]
+												},
+												"name": "cleanup_t_uint96",
+												"nativeSrc": "7:109:4",
+												"nodeType": "YulFunctionDefinition",
+												"parameters": [
+													{
+														"name": "value",
+														"nativeSrc": "33:5:4",
+														"nodeType": "YulTypedName",
+														"src": "33:5:4",
+														"type": ""
+													}
+												],
+												"returnVariables": [
+													{
+														"name": "cleaned",
+														"nativeSrc": "43:7:4",
+														"nodeType": "YulTypedName",
+														"src": "43:7:4",
+														"type": ""
+													}
+												],
+												"src": "7:109:4"
+											},
+											{
+												"body": {
+													"nativeSrc": "193:52:4",
+													"nodeType": "YulBlock",
+													"src": "193:52:4",
+													"statements": [
+														{
+															"expression": {
+																"arguments": [
+																	{
+																		"name": "pos",
+																		"nativeSrc": "210:3:4",
+																		"nodeType": "YulIdentifier",
+																		"src": "210:3:4"
+																	},
+																	{
+																		"arguments": [
+																			{
+																				"name": "value",
+																				"nativeSrc": "232:5:4",
+																				"nodeType": "YulIdentifier",
+																				"src": "232:5:4"
+																			}
+																		],
+																		"functionName": {
+																			"name": "cleanup_t_uint96",
+																			"nativeSrc": "215:16:4",
+																			"nodeType": "YulIdentifier",
+																			"src": "215:16:4"
+																		},
+																		"nativeSrc": "215:23:4",
+																		"nodeType": "YulFunctionCall",
+																		"src": "215:23:4"
+																	}
+																],
+																"functionName": {
+																	"name": "mstore",
+																	"nativeSrc": "203:6:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "203:6:4"
+																},
+																"nativeSrc": "203:36:4",
+																"nodeType": "YulFunctionCall",
+																"src": "203:36:4"
+															},
+															"nativeSrc": "203:36:4",
+															"nodeType": "YulExpressionStatement",
+															"src": "203:36:4"
+														}
+													]
+												},
+												"name": "abi_encode_t_uint96_to_t_uint96_fromStack_library",
+												"nativeSrc": "122:123:4",
+												"nodeType": "YulFunctionDefinition",
+												"parameters": [
+													{
+														"name": "value",
+														"nativeSrc": "181:5:4",
+														"nodeType": "YulTypedName",
+														"src": "181:5:4",
+														"type": ""
+													},
+													{
+														"name": "pos",
+														"nativeSrc": "188:3:4",
+														"nodeType": "YulTypedName",
+														"src": "188:3:4",
+														"type": ""
+													}
+												],
+												"src": "122:123:4"
+											},
+											{
+												"body": {
+													"nativeSrc": "355:130:4",
+													"nodeType": "YulBlock",
+													"src": "355:130:4",
+													"statements": [
+														{
+															"nativeSrc": "365:26:4",
+															"nodeType": "YulAssignment",
+															"src": "365:26:4",
+															"value": {
+																"arguments": [
+																	{
+																		"name": "headStart",
+																		"nativeSrc": "377:9:4",
+																		"nodeType": "YulIdentifier",
+																		"src": "377:9:4"
+																	},
+																	{
+																		"kind": "number",
+																		"nativeSrc": "388:2:4",
+																		"nodeType": "YulLiteral",
+																		"src": "388:2:4",
+																		"type": "",
+																		"value": "32"
+																	}
+																],
+																"functionName": {
+																	"name": "add",
+																	"nativeSrc": "373:3:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "373:3:4"
+																},
+																"nativeSrc": "373:18:4",
+																"nodeType": "YulFunctionCall",
+																"src": "373:18:4"
+															},
+															"variableNames": [
+																{
+																	"name": "tail",
+																	"nativeSrc": "365:4:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "365:4:4"
+																}
+															]
+														},
+														{
+															"expression": {
+																"arguments": [
+																	{
+																		"name": "value0",
+																		"nativeSrc": "451:6:4",
+																		"nodeType": "YulIdentifier",
+																		"src": "451:6:4"
+																	},
+																	{
+																		"arguments": [
+																			{
+																				"name": "headStart",
+																				"nativeSrc": "464:9:4",
+																				"nodeType": "YulIdentifier",
+																				"src": "464:9:4"
+																			},
+																			{
+																				"kind": "number",
+																				"nativeSrc": "475:1:4",
+																				"nodeType": "YulLiteral",
+																				"src": "475:1:4",
+																				"type": "",
+																				"value": "0"
+																			}
+																		],
+																		"functionName": {
+																			"name": "add",
+																			"nativeSrc": "460:3:4",
+																			"nodeType": "YulIdentifier",
+																			"src": "460:3:4"
+																		},
+																		"nativeSrc": "460:17:4",
+																		"nodeType": "YulFunctionCall",
+																		"src": "460:17:4"
+																	}
+																],
+																"functionName": {
+																	"name": "abi_encode_t_uint96_to_t_uint96_fromStack_library",
+																	"nativeSrc": "401:49:4",
+																	"nodeType": "YulIdentifier",
+																	"src": "401:49:4"
+																},
+																"nativeSrc": "401:77:4",
+																"nodeType": "YulFunctionCall",
+																"src": "401:77:4"
+															},
+															"nativeSrc": "401:77:4",
+															"nodeType": "YulExpressionStatement",
+															"src": "401:77:4"
+														}
+													]
+												},
+												"name": "abi_encode_tuple_t_uint96__to_t_uint96__fromStack_library_reversed",
+												"nativeSrc": "251:234:4",
+												"nodeType": "YulFunctionDefinition",
+												"parameters": [
+													{
+														"name": "headStart",
+														"nativeSrc": "327:9:4",
+														"nodeType": "YulTypedName",
+														"src": "327:9:4",
+														"type": ""
+													},
+													{
+														"name": "value0",
+														"nativeSrc": "339:6:4",
+														"nodeType": "YulTypedName",
+														"src": "339:6:4",
+														"type": ""
+													}
+												],
+												"returnVariables": [
+													{
+														"name": "tail",
+														"nativeSrc": "350:4:4",
+														"nodeType": "YulTypedName",
+														"src": "350:4:4",
+														"type": ""
+													}
+												],
+												"src": "251:234:4"
+											}
+										]
+									},
+									"contents": "{\n\n    function cleanup_t_uint96(value) -> cleaned {\n        cleaned := and(value, 0xffffffffffffffffffffffff)\n    }\n\n    function abi_encode_t_uint96_to_t_uint96_fromStack_library(value, pos) {\n        mstore(pos, cleanup_t_uint96(value))\n    }\n\n    function abi_encode_tuple_t_uint96__to_t_uint96__fromStack_library_reversed(headStart , value0) -> tail {\n        tail := add(headStart, 32)\n\n        abi_encode_t_uint96_to_t_uint96_fromStack_library(value0,  add(headStart, 0))\n\n    }\n\n}\n",
+									"id": 4,
+									"language": "Yul",
+									"name": "#utility.yul"
+								}
+							],
+							"immutableReferences": {},
+							"linkReferences": {},
+							"object": "7300000000000000000000000000000000000000003014608060405260043610603c575f3560e01c80631ccff3f5146040578063b1c0c80a14605a575b5f5ffd5b60466074565b6040516051919060a4565b60405180910390f35b6060607a565b604051606b919060a4565b60405180910390f35b61271081565b6101f481565b5f6bffffffffffffffffffffffff82169050919050565b609e816080565b82525050565b5f60208201905060b55f8301846097565b9291505056fea26469706673582212205add5eded0f9a21d18ef512bf3766d3cecc25911d3414461e5ad0d8b6d49fa1d64736f6c634300081c0033",
+							"opcodes": "PUSH20 0x0 ADDRESS EQ PUSH1 0x80 PUSH1 0x40 MSTORE PUSH1 0x4 CALLDATASIZE LT PUSH1 0x3C JUMPI PUSH0 CALLDATALOAD PUSH1 0xE0 SHR DUP1 PUSH4 0x1CCFF3F5 EQ PUSH1 0x40 JUMPI DUP1 PUSH4 0xB1C0C80A EQ PUSH1 0x5A JUMPI JUMPDEST PUSH0 PUSH0 REVERT JUMPDEST PUSH1 0x46 PUSH1 0x74 JUMP JUMPDEST PUSH1 0x40 MLOAD PUSH1 0x51 SWAP2 SWAP1 PUSH1 0xA4 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST PUSH1 0x60 PUSH1 0x7A JUMP JUMPDEST PUSH1 0x40 MLOAD PUSH1 0x6B SWAP2 SWAP1 PUSH1 0xA4 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST PUSH2 0x2710 DUP2 JUMP JUMPDEST PUSH2 0x1F4 DUP2 JUMP JUMPDEST PUSH0 PUSH12 0xFFFFFFFFFFFFFFFFFFFFFFFF DUP3 AND SWAP1 POP SWAP2 SWAP1 POP JUMP JUMPDEST PUSH1 0x9E DUP2 PUSH1 0x80 JUMP JUMPDEST DUP3 MSTORE POP POP JUMP JUMPDEST PUSH0 PUSH1 0x20 DUP3 ADD SWAP1 POP PUSH1 0xB5 PUSH0 DUP4 ADD DUP5 PUSH1 0x97 JUMP JUMPDEST SWAP3 SWAP2 POP POP JUMP INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 GAS 0xDD MCOPY 0xDE 0xD0 0xF9 LOG2 SAR XOR 0xEF MLOAD 0x2B RETURN PUSH23 0x6D3CECC25911D3414461E5AD0D8B6D49FA1D64736F6C63 NUMBER STOP ADDMOD SHR STOP CALLER ",
+							"sourceMap": "241:2115:3:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;499:59;;;:::i;:::-;;;;;;;:::i;:::-;;;;;;;;435:57;;;:::i;:::-;;;;;;;:::i;:::-;;;;;;;;499:59;553:5;499:59;:::o;435:57::-;489:3;435:57;:::o;7:109:4:-;43:7;83:26;76:5;72:38;61:49;;7:109;;;:::o;122:123::-;215:23;232:5;215:23;:::i;:::-;210:3;203:36;122:123;;:::o;251:234::-;350:4;388:2;377:9;373:18;365:26;;401:77;475:1;464:9;460:17;451:6;401:77;:::i;:::-;251:234;;;;:::o"
+						},
+						"gasEstimates": {
+							"creation": {
+								"codeDepositCost": "48200",
+								"executionCost": "122",
+								"totalCost": "48322"
+							},
+							"external": {
+								"DEFAULT_ROYALTY_BASIS_POINTS()": "315",
+								"MAX_ROYALTY_BASIS_POINTS()": "293"
+							},
+							"internal": {
+								"getRoyalty(address,uint256,uint256,address)": "infinite"
+							}
+						},
+						"legacyAssembly": {
+							".code": [
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH #[$]",
+									"source": 3,
+									"value": "0000000000000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH [$]",
+									"source": 3,
+									"value": "0000000000000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "B"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP3",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP3",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP3",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "CODECOPY",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP1",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "MLOAD",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "0"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "BYTE",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "73"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "EQ",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH [tag]",
+									"source": 3,
+									"value": "1"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "JUMPI",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "4E487B7100000000000000000000000000000000000000000000000000000000"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "0"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "MSTORE",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "0"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "4"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "MSTORE",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "24"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "0"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "REVERT",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "tag",
+									"source": 3,
+									"value": "1"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "JUMPDEST",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "ADDRESS",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "0"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "MSTORE",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "PUSH",
+									"source": 3,
+									"value": "73"
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP2",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "MSTORE8",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP3",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "DUP2",
+									"source": 3
+								},
+								{
+									"begin": 241,
+									"end": 2356,
+									"name": "RETURN",
+									"source": 3
+								}
+							],
+							".data": {
+								"0": {
+									".auxdata": "a26469706673582212205add5eded0f9a21d18ef512bf3766d3cecc25911d3414461e5ad0d8b6d49fa1d64736f6c634300081c0033",
+									".code": [
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSHDEPLOYADDRESS",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "ADDRESS",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "EQ",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "80"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "40"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "MSTORE",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "4"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "CALLDATASIZE",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "LT",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "1"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "JUMPI",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "0"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "CALLDATALOAD",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "E0"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "SHR",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "DUP1",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "1CCFF3F5"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "EQ",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "2"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "JUMPI",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "DUP1",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "B1C0C80A"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "EQ",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "3"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "JUMPI",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "tag",
+											"source": 3,
+											"value": "1"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "0"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "PUSH",
+											"source": 3,
+											"value": "0"
+										},
+										{
+											"begin": 241,
+											"end": 2356,
+											"name": "REVERT",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "tag",
+											"source": 3,
+											"value": "2"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "4"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "5"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "tag",
+											"source": 3,
+											"value": "4"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH",
+											"source": 3,
+											"value": "40"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "MLOAD",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "6"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "SWAP2",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "SWAP1",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "7"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "tag",
+											"source": 3,
+											"value": "6"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "PUSH",
+											"source": 3,
+											"value": "40"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "MLOAD",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "DUP1",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "SWAP2",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "SUB",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "SWAP1",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "RETURN",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "tag",
+											"source": 3,
+											"value": "3"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "8"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "9"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "tag",
+											"source": 3,
+											"value": "8"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH",
+											"source": 3,
+											"value": "40"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "MLOAD",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "10"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "SWAP2",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "SWAP1",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH [tag]",
+											"source": 3,
+											"value": "7"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "tag",
+											"source": 3,
+											"value": "10"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "PUSH",
+											"source": 3,
+											"value": "40"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "MLOAD",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "DUP1",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "SWAP2",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "SUB",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "SWAP1",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "RETURN",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "tag",
+											"source": 3,
+											"value": "5"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 553,
+											"end": 558,
+											"name": "PUSH",
+											"source": 3,
+											"value": "2710"
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"name": "DUP2",
+											"source": 3
+										},
+										{
+											"begin": 499,
+											"end": 558,
+											"jumpType": "[out]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "tag",
+											"source": 3,
+											"value": "9"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "JUMPDEST",
+											"source": 3
+										},
+										{
+											"begin": 489,
+											"end": 492,
+											"name": "PUSH",
+											"source": 3,
+											"value": "1F4"
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"name": "DUP2",
+											"source": 3
+										},
+										{
+											"begin": 435,
+											"end": 492,
+											"jumpType": "[out]",
+											"name": "JUMP",
+											"source": 3
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"name": "tag",
+											"source": 4,
+											"value": "11"
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"name": "JUMPDEST",
+											"source": 4
+										},
+										{
+											"begin": 43,
+											"end": 50,
+											"name": "PUSH",
+											"source": 4,
+											"value": "0"
+										},
+										{
+											"begin": 83,
+											"end": 109,
+											"name": "PUSH",
+											"source": 4,
+											"value": "FFFFFFFFFFFFFFFFFFFFFFFF"
+										},
+										{
+											"begin": 76,
+											"end": 81,
+											"name": "DUP3",
+											"source": 4
+										},
+										{
+											"begin": 72,
+											"end": 110,
+											"name": "AND",
+											"source": 4
+										},
+										{
+											"begin": 61,
+											"end": 110,
+											"name": "SWAP1",
+											"source": 4
+										},
+										{
+											"begin": 61,
+											"end": 110,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"name": "SWAP2",
+											"source": 4
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"name": "SWAP1",
+											"source": 4
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 7,
+											"end": 116,
+											"jumpType": "[out]",
+											"name": "JUMP",
+											"source": 4
+										},
+										{
+											"begin": 122,
+											"end": 245,
+											"name": "tag",
+											"source": 4,
+											"value": "12"
+										},
+										{
+											"begin": 122,
+											"end": 245,
+											"name": "JUMPDEST",
+											"source": 4
+										},
+										{
+											"begin": 215,
+											"end": 238,
+											"name": "PUSH [tag]",
+											"source": 4,
+											"value": "16"
+										},
+										{
+											"begin": 232,
+											"end": 237,
+											"name": "DUP2",
+											"source": 4
+										},
+										{
+											"begin": 215,
+											"end": 238,
+											"name": "PUSH [tag]",
+											"source": 4,
+											"value": "11"
+										},
+										{
+											"begin": 215,
+											"end": 238,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 4
+										},
+										{
+											"begin": 215,
+											"end": 238,
+											"name": "tag",
+											"source": 4,
+											"value": "16"
+										},
+										{
+											"begin": 215,
+											"end": 238,
+											"name": "JUMPDEST",
+											"source": 4
+										},
+										{
+											"begin": 210,
+											"end": 213,
+											"name": "DUP3",
+											"source": 4
+										},
+										{
+											"begin": 203,
+											"end": 239,
+											"name": "MSTORE",
+											"source": 4
+										},
+										{
+											"begin": 122,
+											"end": 245,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 122,
+											"end": 245,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 122,
+											"end": 245,
+											"jumpType": "[out]",
+											"name": "JUMP",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "tag",
+											"source": 4,
+											"value": "7"
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "JUMPDEST",
+											"source": 4
+										},
+										{
+											"begin": 350,
+											"end": 354,
+											"name": "PUSH",
+											"source": 4,
+											"value": "0"
+										},
+										{
+											"begin": 388,
+											"end": 390,
+											"name": "PUSH",
+											"source": 4,
+											"value": "20"
+										},
+										{
+											"begin": 377,
+											"end": 386,
+											"name": "DUP3",
+											"source": 4
+										},
+										{
+											"begin": 373,
+											"end": 391,
+											"name": "ADD",
+											"source": 4
+										},
+										{
+											"begin": 365,
+											"end": 391,
+											"name": "SWAP1",
+											"source": 4
+										},
+										{
+											"begin": 365,
+											"end": 391,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 401,
+											"end": 478,
+											"name": "PUSH [tag]",
+											"source": 4,
+											"value": "18"
+										},
+										{
+											"begin": 475,
+											"end": 476,
+											"name": "PUSH",
+											"source": 4,
+											"value": "0"
+										},
+										{
+											"begin": 464,
+											"end": 473,
+											"name": "DUP4",
+											"source": 4
+										},
+										{
+											"begin": 460,
+											"end": 477,
+											"name": "ADD",
+											"source": 4
+										},
+										{
+											"begin": 451,
+											"end": 457,
+											"name": "DUP5",
+											"source": 4
+										},
+										{
+											"begin": 401,
+											"end": 478,
+											"name": "PUSH [tag]",
+											"source": 4,
+											"value": "12"
+										},
+										{
+											"begin": 401,
+											"end": 478,
+											"jumpType": "[in]",
+											"name": "JUMP",
+											"source": 4
+										},
+										{
+											"begin": 401,
+											"end": 478,
+											"name": "tag",
+											"source": 4,
+											"value": "18"
+										},
+										{
+											"begin": 401,
+											"end": 478,
+											"name": "JUMPDEST",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "SWAP3",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "SWAP2",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"name": "POP",
+											"source": 4
+										},
+										{
+											"begin": 251,
+											"end": 485,
+											"jumpType": "[out]",
+											"name": "JUMP",
+											"source": 4
+										}
+									]
+								}
+							},
+							"sourceList": [
+								"contracts/interfaces/IERC165.sol",
+								"contracts/interfaces/IERC2981.sol",
+								"contracts/libraries/ERC165Utils.sol",
+								"contracts/libraries/RoyaltyEngine.sol",
+								"#utility.yul"
+							]
+						},
+						"methodIdentifiers": {
+							"DEFAULT_ROYALTY_BASIS_POINTS()": "b1c0c80a",
+							"MAX_ROYALTY_BASIS_POINTS()": "1ccff3f5"
+						}
+					},
+					"metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[],\"name\":\"DEFAULT_ROYALTY_BASIS_POINTS\",\"outputs\":[{\"internalType\":\"uint96\",\"name\":\"\",\"type\":\"uint96\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"MAX_ROYALTY_BASIS_POINTS\",\"outputs\":[{\"internalType\":\"uint96\",\"name\":\"\",\"type\":\"uint96\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"Helper to fetch ERC-2981 royalties or fallback to defaults.\",\"kind\":\"dev\",\"methods\":{},\"title\":\"RoyaltyEngine\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/libraries/RoyaltyEngine.sol\":\"RoyaltyEngine\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"contracts/interfaces/IERC165.sol\":{\"keccak256\":\"0x366df79a1e9f72d4dfa8cf2a5bad2982d442a0d1440517698d7cf8194e9f4023\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://9e80e4c37a57ec9a422eeea6ae895dc26b9d2eee0c72b03128f5166e9c5a6479\",\"dweb:/ipfs/QmUotNg1bcM4nxinAa8dXY2C764dk2kCj9Jws8GZuRK6z4\"]},\"contracts/interfaces/IERC2981.sol\":{\"keccak256\":\"0x70c684083bb257ec070bca3da5e4a92d4e8fec542a671b13fb1753c97e5f5dfa\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://4882db7f9e18e78d70bb252ca8daabefee11c152ffa7c4a0350a5892089f23b5\",\"dweb:/ipfs/QmckcTfs4y3LDphn8HeJvbF26HZFpfAwB7FnZ3hYjauNFb\"]},\"contracts/libraries/ERC165Utils.sol\":{\"keccak256\":\"0x50d74d15aed64d6d83f839b3af71a265e9ea236582c5d02b5c5e2f5197df3a1a\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://3f685eff4f01dbe48f41a26cf87bbe3c3bcb6ab60163be6d0bb646d6f1075bab\",\"dweb:/ipfs/QmSN2NcLGNBTx7c7GaRSbGYPgX5YYBK79MiC1D6u1KxLC7\"]},\"contracts/libraries/RoyaltyEngine.sol\":{\"keccak256\":\"0x129b6580dec2786532352c14ceca6635a50f40d2bd088d4bb87e6f0558536a90\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://7bcf97648bcd7071e4e084fc23e47c8e0d0e57f34c70dd60010b2d5c9bde82de\",\"dweb:/ipfs/QmaWPDVC2EE6mdJqjeuPboFmnAWy7G1SomW5irEdqTdAMz\"]}},\"version\":1}",
+					"storageLayout": {
+						"storage": [],
+						"types": null
+					},
+					"userdoc": {
+						"kind": "user",
+						"methods": {},
+						"version": 1
+					}
+				}
+			}
+		},
+		"sources": {
+			"contracts/interfaces/IERC165.sol": {
+				"ast": {
+					"absolutePath": "contracts/interfaces/IERC165.sol",
+					"exportedSymbols": {
+						"IERC165": [
+							11
+						]
+					},
+					"id": 12,
+					"license": "MIT",
+					"nodeType": "SourceUnit",
+					"nodes": [
+						{
+							"id": 1,
+							"literals": [
+								"solidity",
+								"^",
+								"0.8",
+								".20"
+							],
+							"nodeType": "PragmaDirective",
+							"src": "33:24:0"
+						},
+						{
+							"abstract": false,
+							"baseContracts": [],
+							"canonicalName": "IERC165",
+							"contractDependencies": [],
+							"contractKind": "interface",
+							"documentation": {
+								"id": 2,
+								"nodeType": "StructuredDocumentation",
+								"src": "61:111:0",
+								"text": " @title Minimal IERC165 interface\n @dev Interface of the ERC165 standard, as defined in the EIP."
+							},
+							"fullyImplemented": false,
+							"id": 11,
+							"linearizedBaseContracts": [
+								11
+							],
+							"name": "IERC165",
+							"nameLocation": "184:7:0",
+							"nodeType": "ContractDefinition",
+							"nodes": [
+								{
+									"documentation": {
+										"id": 3,
+										"nodeType": "StructuredDocumentation",
+										"src": "199:347:0",
+										"text": " @dev Returns true if this contract implements the interface defined by\n `interfaceId`. See the corresponding\n https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[EIP section]\n to learn more about how these ids are created.\n This function call must use less than 30 000 gas."
+									},
+									"functionSelector": "01ffc9a7",
+									"id": 10,
+									"implemented": false,
+									"kind": "function",
+									"modifiers": [],
+									"name": "supportsInterface",
+									"nameLocation": "561:17:0",
+									"nodeType": "FunctionDefinition",
+									"parameters": {
+										"id": 6,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 5,
+												"mutability": "mutable",
+												"name": "interfaceId",
+												"nameLocation": "586:11:0",
+												"nodeType": "VariableDeclaration",
+												"scope": 10,
+												"src": "579:18:0",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_bytes4",
+													"typeString": "bytes4"
+												},
+												"typeName": {
+													"id": 4,
+													"name": "bytes4",
+													"nodeType": "ElementaryTypeName",
+													"src": "579:6:0",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bytes4",
+														"typeString": "bytes4"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "578:20:0"
+									},
+									"returnParameters": {
+										"id": 9,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 8,
+												"mutability": "mutable",
+												"name": "",
+												"nameLocation": "-1:-1:-1",
+												"nodeType": "VariableDeclaration",
+												"scope": 10,
+												"src": "622:4:0",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_bool",
+													"typeString": "bool"
+												},
+												"typeName": {
+													"id": 7,
+													"name": "bool",
+													"nodeType": "ElementaryTypeName",
+													"src": "622:4:0",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "621:6:0"
+									},
+									"scope": 11,
+									"src": "552:76:0",
+									"stateMutability": "view",
+									"virtual": false,
+									"visibility": "external"
+								}
+							],
+							"scope": 12,
+							"src": "174:457:0",
+							"usedErrors": [],
+							"usedEvents": []
+						}
+					],
+					"src": "33:598:0"
+				},
+				"id": 0
+			},
+			"contracts/interfaces/IERC2981.sol": {
+				"ast": {
+					"absolutePath": "contracts/interfaces/IERC2981.sol",
+					"exportedSymbols": {
+						"IERC165": [
+							11
+						],
+						"IERC2981": [
+							31
+						]
+					},
+					"id": 32,
+					"license": "MIT",
+					"nodeType": "SourceUnit",
+					"nodes": [
+						{
+							"id": 13,
+							"literals": [
+								"solidity",
+								"^",
+								"0.8",
+								".20"
+							],
+							"nodeType": "PragmaDirective",
+							"src": "33:24:1"
+						},
+						{
+							"absolutePath": "contracts/interfaces/IERC165.sol",
+							"file": "./IERC165.sol",
+							"id": 15,
+							"nameLocation": "-1:-1:-1",
+							"nodeType": "ImportDirective",
+							"scope": 32,
+							"sourceUnit": 12,
+							"src": "59:38:1",
+							"symbolAliases": [
+								{
+									"foreign": {
+										"id": 14,
+										"name": "IERC165",
+										"nodeType": "Identifier",
+										"overloadedDeclarations": [],
+										"referencedDeclaration": 11,
+										"src": "67:7:1",
+										"typeDescriptions": {}
+									},
+									"nameLocation": "-1:-1:-1"
+								}
+							],
+							"unitAlias": ""
+						},
+						{
+							"abstract": false,
+							"baseContracts": [
+								{
+									"baseName": {
+										"id": 17,
+										"name": "IERC165",
+										"nameLocations": [
+											"241:7:1"
+										],
+										"nodeType": "IdentifierPath",
+										"referencedDeclaration": 11,
+										"src": "241:7:1"
+									},
+									"id": 18,
+									"nodeType": "InheritanceSpecifier",
+									"src": "241:7:1"
+								}
+							],
+							"canonicalName": "IERC2981",
+							"contractDependencies": [],
+							"contractKind": "interface",
+							"documentation": {
+								"id": 16,
+								"nodeType": "StructuredDocumentation",
+								"src": "101:116:1",
+								"text": " @title Minimal IERC2981 Royalty Standard interface\n @dev See https://eips.ethereum.org/EIPS/eip-2981"
+							},
+							"fullyImplemented": false,
+							"id": 31,
+							"linearizedBaseContracts": [
+								31,
+								11
+							],
+							"name": "IERC2981",
+							"nameLocation": "229:8:1",
+							"nodeType": "ContractDefinition",
+							"nodes": [
+								{
+									"documentation": {
+										"id": 19,
+										"nodeType": "StructuredDocumentation",
+										"src": "256:413:1",
+										"text": " @dev Called with the sale price to determine how much royalty is owed and to whom.\n @param tokenId - the NFT asset queried for royalty information\n @param salePrice - the sale price of the NFT asset specified by `tokenId`\n @return receiver - address of who should receive the royalties.\n @return royaltyAmount - the royalty amount calculated given the `salePrice`."
+									},
+									"functionSelector": "2a55205a",
+									"id": 30,
+									"implemented": false,
+									"kind": "function",
+									"modifiers": [],
+									"name": "royaltyInfo",
+									"nameLocation": "684:11:1",
+									"nodeType": "FunctionDefinition",
+									"parameters": {
+										"id": 24,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 21,
+												"mutability": "mutable",
+												"name": "tokenId",
+												"nameLocation": "704:7:1",
+												"nodeType": "VariableDeclaration",
+												"scope": 30,
+												"src": "696:15:1",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												},
+												"typeName": {
+													"id": 20,
+													"name": "uint256",
+													"nodeType": "ElementaryTypeName",
+													"src": "696:7:1",
+													"typeDescriptions": {
+														"typeIdentifier": "t_uint256",
+														"typeString": "uint256"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 23,
+												"mutability": "mutable",
+												"name": "salePrice",
+												"nameLocation": "721:9:1",
+												"nodeType": "VariableDeclaration",
+												"scope": 30,
+												"src": "713:17:1",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												},
+												"typeName": {
+													"id": 22,
+													"name": "uint256",
+													"nodeType": "ElementaryTypeName",
+													"src": "713:7:1",
+													"typeDescriptions": {
+														"typeIdentifier": "t_uint256",
+														"typeString": "uint256"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "695:36:1"
+									},
+									"returnParameters": {
+										"id": 29,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 26,
+												"mutability": "mutable",
+												"name": "receiver",
+												"nameLocation": "763:8:1",
+												"nodeType": "VariableDeclaration",
+												"scope": 30,
+												"src": "755:16:1",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_address",
+													"typeString": "address"
+												},
+												"typeName": {
+													"id": 25,
+													"name": "address",
+													"nodeType": "ElementaryTypeName",
+													"src": "755:7:1",
+													"stateMutability": "nonpayable",
+													"typeDescriptions": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 28,
+												"mutability": "mutable",
+												"name": "royaltyAmount",
+												"nameLocation": "781:13:1",
+												"nodeType": "VariableDeclaration",
+												"scope": 30,
+												"src": "773:21:1",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												},
+												"typeName": {
+													"id": 27,
+													"name": "uint256",
+													"nodeType": "ElementaryTypeName",
+													"src": "773:7:1",
+													"typeDescriptions": {
+														"typeIdentifier": "t_uint256",
+														"typeString": "uint256"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "754:41:1"
+									},
+									"scope": 31,
+									"src": "675:121:1",
+									"stateMutability": "view",
+									"virtual": false,
+									"visibility": "external"
+								}
+							],
+							"scope": 32,
+							"src": "219:580:1",
+							"usedErrors": [],
+							"usedEvents": []
+						}
+					],
+					"src": "33:766:1"
+				},
+				"id": 1
+			},
+			"contracts/libraries/ERC165Utils.sol": {
+				"ast": {
+					"absolutePath": "contracts/libraries/ERC165Utils.sol",
+					"exportedSymbols": {
+						"ERC165Utils": [
+							77
+						]
+					},
+					"id": 78,
+					"license": "MIT",
+					"nodeType": "SourceUnit",
+					"nodes": [
+						{
+							"id": 33,
+							"literals": [
+								"solidity",
+								"^",
+								"0.8",
+								".20"
+							],
+							"nodeType": "PragmaDirective",
+							"src": "33:24:2"
+						},
+						{
+							"abstract": false,
+							"baseContracts": [],
+							"canonicalName": "ERC165Utils",
+							"contractDependencies": [],
+							"contractKind": "library",
+							"fullyImplemented": true,
+							"id": 77,
+							"linearizedBaseContracts": [
+								77
+							],
+							"name": "ERC165Utils",
+							"nameLocation": "69:11:2",
+							"nodeType": "ContractDefinition",
+							"nodes": [
+								{
+									"body": {
+										"id": 75,
+										"nodeType": "Block",
+										"src": "181:286:2",
+										"statements": [
+											{
+												"assignments": [
+													43,
+													45
+												],
+												"declarations": [
+													{
+														"constant": false,
+														"id": 43,
+														"mutability": "mutable",
+														"name": "success",
+														"nameLocation": "198:7:2",
+														"nodeType": "VariableDeclaration",
+														"scope": 75,
+														"src": "193:12:2",
+														"stateVariable": false,
+														"storageLocation": "default",
+														"typeDescriptions": {
+															"typeIdentifier": "t_bool",
+															"typeString": "bool"
+														},
+														"typeName": {
+															"id": 42,
+															"name": "bool",
+															"nodeType": "ElementaryTypeName",
+															"src": "193:4:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bool",
+																"typeString": "bool"
+															}
+														},
+														"visibility": "internal"
+													},
+													{
+														"constant": false,
+														"id": 45,
+														"mutability": "mutable",
+														"name": "result",
+														"nameLocation": "220:6:2",
+														"nodeType": "VariableDeclaration",
+														"scope": 75,
+														"src": "207:19:2",
+														"stateVariable": false,
+														"storageLocation": "memory",
+														"typeDescriptions": {
+															"typeIdentifier": "t_bytes_memory_ptr",
+															"typeString": "bytes"
+														},
+														"typeName": {
+															"id": 44,
+															"name": "bytes",
+															"nodeType": "ElementaryTypeName",
+															"src": "207:5:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bytes_storage_ptr",
+																"typeString": "bytes"
+															}
+														},
+														"visibility": "internal"
+													}
+												],
+												"id": 56,
+												"initialValue": {
+													"arguments": [
+														{
+															"arguments": [
+																{
+																	"hexValue": "30783031666663396137",
+																	"id": 52,
+																	"isConstant": false,
+																	"isLValue": false,
+																	"isPure": true,
+																	"kind": "number",
+																	"lValueRequested": false,
+																	"nodeType": "Literal",
+																	"src": "298:10:2",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_rational_33540519_by_1",
+																		"typeString": "int_const 33540519"
+																	},
+																	"value": "0x01ffc9a7"
+																},
+																{
+																	"id": 53,
+																	"name": "interfaceId",
+																	"nodeType": "Identifier",
+																	"overloadedDeclarations": [],
+																	"referencedDeclaration": 37,
+																	"src": "310:11:2",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_bytes4",
+																		"typeString": "bytes4"
+																	}
+																}
+															],
+															"expression": {
+																"argumentTypes": [
+																	{
+																		"typeIdentifier": "t_rational_33540519_by_1",
+																		"typeString": "int_const 33540519"
+																	},
+																	{
+																		"typeIdentifier": "t_bytes4",
+																		"typeString": "bytes4"
+																	}
+																],
+																"expression": {
+																	"id": 50,
+																	"name": "abi",
+																	"nodeType": "Identifier",
+																	"overloadedDeclarations": [],
+																	"referencedDeclaration": 4294967295,
+																	"src": "275:3:2",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_magic_abi",
+																		"typeString": "abi"
+																	}
+																},
+																"id": 51,
+																"isConstant": false,
+																"isLValue": false,
+																"isPure": true,
+																"lValueRequested": false,
+																"memberLocation": "279:18:2",
+																"memberName": "encodeWithSelector",
+																"nodeType": "MemberAccess",
+																"src": "275:22:2",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_function_abiencodewithselector_pure$_t_bytes4_$returns$_t_bytes_memory_ptr_$",
+																	"typeString": "function (bytes4) pure returns (bytes memory)"
+																}
+															},
+															"id": 54,
+															"isConstant": false,
+															"isLValue": false,
+															"isPure": false,
+															"kind": "functionCall",
+															"lValueRequested": false,
+															"nameLocations": [],
+															"names": [],
+															"nodeType": "FunctionCall",
+															"src": "275:47:2",
+															"tryCall": false,
+															"typeDescriptions": {
+																"typeIdentifier": "t_bytes_memory_ptr",
+																"typeString": "bytes memory"
+															}
+														}
+													],
+													"expression": {
+														"argumentTypes": [
+															{
+																"typeIdentifier": "t_bytes_memory_ptr",
+																"typeString": "bytes memory"
+															}
+														],
+														"expression": {
+															"argumentTypes": [
+																{
+																	"typeIdentifier": "t_bytes_memory_ptr",
+																	"typeString": "bytes memory"
+																}
+															],
+															"expression": {
+																"id": 46,
+																"name": "account",
+																"nodeType": "Identifier",
+																"overloadedDeclarations": [],
+																"referencedDeclaration": 35,
+																"src": "230:7:2",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_address",
+																	"typeString": "address"
+																}
+															},
+															"id": 47,
+															"isConstant": false,
+															"isLValue": false,
+															"isPure": false,
+															"lValueRequested": false,
+															"memberLocation": "238:10:2",
+															"memberName": "staticcall",
+															"nodeType": "MemberAccess",
+															"src": "230:18:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_function_barestaticcall_view$_t_bytes_memory_ptr_$returns$_t_bool_$_t_bytes_memory_ptr_$",
+																"typeString": "function (bytes memory) view returns (bool,bytes memory)"
+															}
+														},
+														"id": 49,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": false,
+														"lValueRequested": false,
+														"names": [
+															"gas"
+														],
+														"nodeType": "FunctionCallOptions",
+														"options": [
+															{
+																"hexValue": "3330303030",
+																"id": 48,
+																"isConstant": false,
+																"isLValue": false,
+																"isPure": true,
+																"kind": "number",
+																"lValueRequested": false,
+																"nodeType": "Literal",
+																"src": "254:5:2",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_rational_30000_by_1",
+																	"typeString": "int_const 30000"
+																},
+																"value": "30000"
+															}
+														],
+														"src": "230:30:2",
+														"typeDescriptions": {
+															"typeIdentifier": "t_function_barestaticcall_view$_t_bytes_memory_ptr_$returns$_t_bool_$_t_bytes_memory_ptr_$gas",
+															"typeString": "function (bytes memory) view returns (bool,bytes memory)"
+														}
+													},
+													"id": 55,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"kind": "functionCall",
+													"lValueRequested": false,
+													"nameLocations": [],
+													"names": [],
+													"nodeType": "FunctionCall",
+													"src": "230:126:2",
+													"tryCall": false,
+													"typeDescriptions": {
+														"typeIdentifier": "t_tuple$_t_bool_$_t_bytes_memory_ptr_$",
+														"typeString": "tuple(bool,bytes memory)"
+													}
+												},
+												"nodeType": "VariableDeclarationStatement",
+												"src": "192:164:2"
+											},
+											{
+												"condition": {
+													"commonType": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													},
+													"id": 63,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"lValueRequested": false,
+													"leftExpression": {
+														"id": 58,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": false,
+														"lValueRequested": false,
+														"nodeType": "UnaryOperation",
+														"operator": "!",
+														"prefix": true,
+														"src": "371:8:2",
+														"subExpression": {
+															"id": 57,
+															"name": "success",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 43,
+															"src": "372:7:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bool",
+																"typeString": "bool"
+															}
+														},
+														"typeDescriptions": {
+															"typeIdentifier": "t_bool",
+															"typeString": "bool"
+														}
+													},
+													"nodeType": "BinaryOperation",
+													"operator": "||",
+													"rightExpression": {
+														"commonType": {
+															"typeIdentifier": "t_uint256",
+															"typeString": "uint256"
+														},
+														"id": 62,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": false,
+														"lValueRequested": false,
+														"leftExpression": {
+															"expression": {
+																"id": 59,
+																"name": "result",
+																"nodeType": "Identifier",
+																"overloadedDeclarations": [],
+																"referencedDeclaration": 45,
+																"src": "383:6:2",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_bytes_memory_ptr",
+																	"typeString": "bytes memory"
+																}
+															},
+															"id": 60,
+															"isConstant": false,
+															"isLValue": false,
+															"isPure": false,
+															"lValueRequested": false,
+															"memberLocation": "390:6:2",
+															"memberName": "length",
+															"nodeType": "MemberAccess",
+															"src": "383:13:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_uint256",
+																"typeString": "uint256"
+															}
+														},
+														"nodeType": "BinaryOperation",
+														"operator": "<",
+														"rightExpression": {
+															"hexValue": "3332",
+															"id": 61,
+															"isConstant": false,
+															"isLValue": false,
+															"isPure": true,
+															"kind": "number",
+															"lValueRequested": false,
+															"nodeType": "Literal",
+															"src": "399:2:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_rational_32_by_1",
+																"typeString": "int_const 32"
+															},
+															"value": "32"
+														},
+														"src": "383:18:2",
+														"typeDescriptions": {
+															"typeIdentifier": "t_bool",
+															"typeString": "bool"
+														}
+													},
+													"src": "371:30:2",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"id": 66,
+												"nodeType": "IfStatement",
+												"src": "367:48:2",
+												"trueBody": {
+													"expression": {
+														"hexValue": "66616c7365",
+														"id": 64,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": true,
+														"kind": "bool",
+														"lValueRequested": false,
+														"nodeType": "Literal",
+														"src": "410:5:2",
+														"typeDescriptions": {
+															"typeIdentifier": "t_bool",
+															"typeString": "bool"
+														},
+														"value": "false"
+													},
+													"functionReturnParameters": 41,
+													"id": 65,
+													"nodeType": "Return",
+													"src": "403:12:2"
+												}
+											},
+											{
+												"expression": {
+													"arguments": [
+														{
+															"id": 69,
+															"name": "result",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 45,
+															"src": "444:6:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bytes_memory_ptr",
+																"typeString": "bytes memory"
+															}
+														},
+														{
+															"components": [
+																{
+																	"id": 71,
+																	"isConstant": false,
+																	"isLValue": false,
+																	"isPure": true,
+																	"lValueRequested": false,
+																	"nodeType": "ElementaryTypeNameExpression",
+																	"src": "453:4:2",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_type$_t_bool_$",
+																		"typeString": "type(bool)"
+																	},
+																	"typeName": {
+																		"id": 70,
+																		"name": "bool",
+																		"nodeType": "ElementaryTypeName",
+																		"src": "453:4:2",
+																		"typeDescriptions": {}
+																	}
+																}
+															],
+															"id": 72,
+															"isConstant": false,
+															"isInlineArray": false,
+															"isLValue": false,
+															"isPure": true,
+															"lValueRequested": false,
+															"nodeType": "TupleExpression",
+															"src": "452:6:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_type$_t_bool_$",
+																"typeString": "type(bool)"
+															}
+														}
+													],
+													"expression": {
+														"argumentTypes": [
+															{
+																"typeIdentifier": "t_bytes_memory_ptr",
+																"typeString": "bytes memory"
+															},
+															{
+																"typeIdentifier": "t_type$_t_bool_$",
+																"typeString": "type(bool)"
+															}
+														],
+														"expression": {
+															"id": 67,
+															"name": "abi",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 4294967295,
+															"src": "433:3:2",
+															"typeDescriptions": {
+																"typeIdentifier": "t_magic_abi",
+																"typeString": "abi"
+															}
+														},
+														"id": 68,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": true,
+														"lValueRequested": false,
+														"memberLocation": "437:6:2",
+														"memberName": "decode",
+														"nodeType": "MemberAccess",
+														"src": "433:10:2",
+														"typeDescriptions": {
+															"typeIdentifier": "t_function_abidecode_pure$__$returns$__$",
+															"typeString": "function () pure"
+														}
+													},
+													"id": 73,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"kind": "functionCall",
+													"lValueRequested": false,
+													"nameLocations": [],
+													"names": [],
+													"nodeType": "FunctionCall",
+													"src": "433:26:2",
+													"tryCall": false,
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"functionReturnParameters": 41,
+												"id": 74,
+												"nodeType": "Return",
+												"src": "426:33:2"
+											}
+										]
+									},
+									"id": 76,
+									"implemented": true,
+									"kind": "function",
+									"modifiers": [],
+									"name": "supportsInterface",
+									"nameLocation": "97:17:2",
+									"nodeType": "FunctionDefinition",
+									"parameters": {
+										"id": 38,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 35,
+												"mutability": "mutable",
+												"name": "account",
+												"nameLocation": "123:7:2",
+												"nodeType": "VariableDeclaration",
+												"scope": 76,
+												"src": "115:15:2",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_address",
+													"typeString": "address"
+												},
+												"typeName": {
+													"id": 34,
+													"name": "address",
+													"nodeType": "ElementaryTypeName",
+													"src": "115:7:2",
+													"stateMutability": "nonpayable",
+													"typeDescriptions": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 37,
+												"mutability": "mutable",
+												"name": "interfaceId",
+												"nameLocation": "139:11:2",
+												"nodeType": "VariableDeclaration",
+												"scope": 76,
+												"src": "132:18:2",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_bytes4",
+													"typeString": "bytes4"
+												},
+												"typeName": {
+													"id": 36,
+													"name": "bytes4",
+													"nodeType": "ElementaryTypeName",
+													"src": "132:6:2",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bytes4",
+														"typeString": "bytes4"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "114:37:2"
+									},
+									"returnParameters": {
+										"id": 41,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 40,
+												"mutability": "mutable",
+												"name": "",
+												"nameLocation": "-1:-1:-1",
+												"nodeType": "VariableDeclaration",
+												"scope": 76,
+												"src": "175:4:2",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_bool",
+													"typeString": "bool"
+												},
+												"typeName": {
+													"id": 39,
+													"name": "bool",
+													"nodeType": "ElementaryTypeName",
+													"src": "175:4:2",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "174:6:2"
+									},
+									"scope": 77,
+									"src": "88:379:2",
+									"stateMutability": "view",
+									"virtual": false,
+									"visibility": "internal"
+								}
+							],
+							"scope": 78,
+							"src": "61:409:2",
+							"usedErrors": [],
+							"usedEvents": []
+						}
+					],
+					"src": "33:439:2"
+				},
+				"id": 2
+			},
+			"contracts/libraries/RoyaltyEngine.sol": {
+				"ast": {
+					"absolutePath": "contracts/libraries/RoyaltyEngine.sol",
+					"exportedSymbols": {
+						"ERC165Utils": [
+							77
+						],
+						"IERC165": [
+							11
+						],
+						"IERC2981": [
+							31
+						],
+						"RoyaltyEngine": [
+							201
+						]
+					},
+					"id": 202,
+					"license": "MIT",
+					"nodeType": "SourceUnit",
+					"nodes": [
+						{
+							"id": 79,
+							"literals": [
+								"solidity",
+								"^",
+								"0.8",
+								".20"
+							],
+							"nodeType": "PragmaDirective",
+							"src": "33:24:3"
+						},
+						{
+							"absolutePath": "contracts/libraries/ERC165Utils.sol",
+							"file": "../libraries/ERC165Utils.sol",
+							"id": 80,
+							"nameLocation": "-1:-1:-1",
+							"nodeType": "ImportDirective",
+							"scope": 202,
+							"sourceUnit": 78,
+							"src": "61:38:3",
+							"symbolAliases": [],
+							"unitAlias": ""
+						},
+						{
+							"absolutePath": "contracts/interfaces/IERC2981.sol",
+							"file": "../interfaces/IERC2981.sol",
+							"id": 81,
+							"nameLocation": "-1:-1:-1",
+							"nodeType": "ImportDirective",
+							"scope": 202,
+							"sourceUnit": 32,
+							"src": "101:36:3",
+							"symbolAliases": [],
+							"unitAlias": ""
+						},
+						{
+							"abstract": false,
+							"baseContracts": [],
+							"canonicalName": "RoyaltyEngine",
+							"contractDependencies": [],
+							"contractKind": "library",
+							"documentation": {
+								"id": 82,
+								"nodeType": "StructuredDocumentation",
+								"src": "141:100:3",
+								"text": "@title  RoyaltyEngine\n @dev    Helper to fetch ERC-2981 royalties or fallback to defaults."
+							},
+							"fullyImplemented": true,
+							"id": 201,
+							"linearizedBaseContracts": [
+								201
+							],
+							"name": "RoyaltyEngine",
+							"nameLocation": "249:13:3",
+							"nodeType": "ContractDefinition",
+							"nodes": [
+								{
+									"constant": true,
+									"id": 88,
+									"mutability": "constant",
+									"name": "_INTERFACE_ID_ERC2981",
+									"nameLocation": "324:21:3",
+									"nodeType": "VariableDeclaration",
+									"scope": 201,
+									"src": "300:74:3",
+									"stateVariable": true,
+									"storageLocation": "default",
+									"typeDescriptions": {
+										"typeIdentifier": "t_bytes4",
+										"typeString": "bytes4"
+									},
+									"typeName": {
+										"id": 83,
+										"name": "bytes4",
+										"nodeType": "ElementaryTypeName",
+										"src": "300:6:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_bytes4",
+											"typeString": "bytes4"
+										}
+									},
+									"value": {
+										"expression": {
+											"arguments": [
+												{
+													"id": 85,
+													"name": "IERC2981",
+													"nodeType": "Identifier",
+													"overloadedDeclarations": [],
+													"referencedDeclaration": 31,
+													"src": "353:8:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_type$_t_contract$_IERC2981_$31_$",
+														"typeString": "type(contract IERC2981)"
+													}
+												}
+											],
+											"expression": {
+												"argumentTypes": [
+													{
+														"typeIdentifier": "t_type$_t_contract$_IERC2981_$31_$",
+														"typeString": "type(contract IERC2981)"
+													}
+												],
+												"id": 84,
+												"name": "type",
+												"nodeType": "Identifier",
+												"overloadedDeclarations": [],
+												"referencedDeclaration": 4294967269,
+												"src": "348:4:3",
+												"typeDescriptions": {
+													"typeIdentifier": "t_function_metatype_pure$__$returns$__$",
+													"typeString": "function () pure"
+												}
+											},
+											"id": 86,
+											"isConstant": false,
+											"isLValue": false,
+											"isPure": true,
+											"kind": "functionCall",
+											"lValueRequested": false,
+											"nameLocations": [],
+											"names": [],
+											"nodeType": "FunctionCall",
+											"src": "348:14:3",
+											"tryCall": false,
+											"typeDescriptions": {
+												"typeIdentifier": "t_magic_meta_type_t_contract$_IERC2981_$31",
+												"typeString": "type(contract IERC2981)"
+											}
+										},
+										"id": 87,
+										"isConstant": false,
+										"isLValue": false,
+										"isPure": true,
+										"lValueRequested": false,
+										"memberLocation": "363:11:3",
+										"memberName": "interfaceId",
+										"nodeType": "MemberAccess",
+										"src": "348:26:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_bytes4",
+											"typeString": "bytes4"
+										}
+									},
+									"visibility": "private"
+								},
+								{
+									"constant": true,
+									"functionSelector": "b1c0c80a",
+									"id": 91,
+									"mutability": "constant",
+									"name": "DEFAULT_ROYALTY_BASIS_POINTS",
+									"nameLocation": "458:28:3",
+									"nodeType": "VariableDeclaration",
+									"scope": 201,
+									"src": "435:57:3",
+									"stateVariable": true,
+									"storageLocation": "default",
+									"typeDescriptions": {
+										"typeIdentifier": "t_uint96",
+										"typeString": "uint96"
+									},
+									"typeName": {
+										"id": 89,
+										"name": "uint96",
+										"nodeType": "ElementaryTypeName",
+										"src": "435:6:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_uint96",
+											"typeString": "uint96"
+										}
+									},
+									"value": {
+										"hexValue": "353030",
+										"id": 90,
+										"isConstant": false,
+										"isLValue": false,
+										"isPure": true,
+										"kind": "number",
+										"lValueRequested": false,
+										"nodeType": "Literal",
+										"src": "489:3:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_rational_500_by_1",
+											"typeString": "int_const 500"
+										},
+										"value": "500"
+									},
+									"visibility": "public"
+								},
+								{
+									"constant": true,
+									"functionSelector": "1ccff3f5",
+									"id": 94,
+									"mutability": "constant",
+									"name": "MAX_ROYALTY_BASIS_POINTS",
+									"nameLocation": "522:24:3",
+									"nodeType": "VariableDeclaration",
+									"scope": 201,
+									"src": "499:59:3",
+									"stateVariable": true,
+									"storageLocation": "default",
+									"typeDescriptions": {
+										"typeIdentifier": "t_uint96",
+										"typeString": "uint96"
+									},
+									"typeName": {
+										"id": 92,
+										"name": "uint96",
+										"nodeType": "ElementaryTypeName",
+										"src": "499:6:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_uint96",
+											"typeString": "uint96"
+										}
+									},
+									"value": {
+										"hexValue": "3130303030",
+										"id": 93,
+										"isConstant": false,
+										"isLValue": false,
+										"isPure": true,
+										"kind": "number",
+										"lValueRequested": false,
+										"nodeType": "Literal",
+										"src": "553:5:3",
+										"typeDescriptions": {
+											"typeIdentifier": "t_rational_10000_by_1",
+											"typeString": "int_const 10000"
+										},
+										"value": "10000"
+									},
+									"visibility": "public"
+								},
+								{
+									"canonicalName": "RoyaltyEngine.RoyaltyInfo",
+									"id": 99,
+									"members": [
+										{
+											"constant": false,
+											"id": 96,
+											"mutability": "mutable",
+											"name": "receiver",
+											"nameLocation": "605:8:3",
+											"nodeType": "VariableDeclaration",
+											"scope": 99,
+											"src": "597:16:3",
+											"stateVariable": false,
+											"storageLocation": "default",
+											"typeDescriptions": {
+												"typeIdentifier": "t_address",
+												"typeString": "address"
+											},
+											"typeName": {
+												"id": 95,
+												"name": "address",
+												"nodeType": "ElementaryTypeName",
+												"src": "597:7:3",
+												"stateMutability": "nonpayable",
+												"typeDescriptions": {
+													"typeIdentifier": "t_address",
+													"typeString": "address"
+												}
+											},
+											"visibility": "internal"
+										},
+										{
+											"constant": false,
+											"id": 98,
+											"mutability": "mutable",
+											"name": "amount",
+											"nameLocation": "632:6:3",
+											"nodeType": "VariableDeclaration",
+											"scope": 99,
+											"src": "624:14:3",
+											"stateVariable": false,
+											"storageLocation": "default",
+											"typeDescriptions": {
+												"typeIdentifier": "t_uint256",
+												"typeString": "uint256"
+											},
+											"typeName": {
+												"id": 97,
+												"name": "uint256",
+												"nodeType": "ElementaryTypeName",
+												"src": "624:7:3",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												}
+											},
+											"visibility": "internal"
+										}
+									],
+									"name": "RoyaltyInfo",
+									"nameLocation": "574:11:3",
+									"nodeType": "StructDefinition",
+									"scope": 201,
+									"src": "567:79:3",
+									"visibility": "public"
+								},
+								{
+									"body": {
+										"id": 199,
+										"nodeType": "Block",
+										"src": "1145:1208:3",
+										"statements": [
+											{
+												"assignments": [
+													115
+												],
+												"declarations": [
+													{
+														"constant": false,
+														"id": 115,
+														"mutability": "mutable",
+														"name": "supportsRoyalty",
+														"nameLocation": "1235:15:3",
+														"nodeType": "VariableDeclaration",
+														"scope": 199,
+														"src": "1230:20:3",
+														"stateVariable": false,
+														"storageLocation": "default",
+														"typeDescriptions": {
+															"typeIdentifier": "t_bool",
+															"typeString": "bool"
+														},
+														"typeName": {
+															"id": 114,
+															"name": "bool",
+															"nodeType": "ElementaryTypeName",
+															"src": "1230:4:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bool",
+																"typeString": "bool"
+															}
+														},
+														"visibility": "internal"
+													}
+												],
+												"id": 121,
+												"initialValue": {
+													"arguments": [
+														{
+															"id": 118,
+															"name": "nftContract",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 102,
+															"src": "1283:11:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_address",
+																"typeString": "address"
+															}
+														},
+														{
+															"id": 119,
+															"name": "_INTERFACE_ID_ERC2981",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 88,
+															"src": "1296:21:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_bytes4",
+																"typeString": "bytes4"
+															}
+														}
+													],
+													"expression": {
+														"argumentTypes": [
+															{
+																"typeIdentifier": "t_address",
+																"typeString": "address"
+															},
+															{
+																"typeIdentifier": "t_bytes4",
+																"typeString": "bytes4"
+															}
+														],
+														"expression": {
+															"id": 116,
+															"name": "ERC165Utils",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 77,
+															"src": "1253:11:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_type$_t_contract$_ERC165Utils_$77_$",
+																"typeString": "type(library ERC165Utils)"
+															}
+														},
+														"id": 117,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": false,
+														"lValueRequested": false,
+														"memberLocation": "1265:17:3",
+														"memberName": "supportsInterface",
+														"nodeType": "MemberAccess",
+														"referencedDeclaration": 76,
+														"src": "1253:29:3",
+														"typeDescriptions": {
+															"typeIdentifier": "t_function_internal_view$_t_address_$_t_bytes4_$returns$_t_bool_$",
+															"typeString": "function (address,bytes4) view returns (bool)"
+														}
+													},
+													"id": 120,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"kind": "functionCall",
+													"lValueRequested": false,
+													"nameLocations": [],
+													"names": [],
+													"nodeType": "FunctionCall",
+													"src": "1253:65:3",
+													"tryCall": false,
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"nodeType": "VariableDeclarationStatement",
+												"src": "1230:88:3"
+											},
+											{
+												"condition": {
+													"id": 122,
+													"name": "supportsRoyalty",
+													"nodeType": "Identifier",
+													"overloadedDeclarations": [],
+													"referencedDeclaration": 115,
+													"src": "1397:15:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"id": 171,
+												"nodeType": "IfStatement",
+												"src": "1393:621:3",
+												"trueBody": {
+													"id": 170,
+													"nodeType": "Block",
+													"src": "1414:600:3",
+													"statements": [
+														{
+															"clauses": [
+																{
+																	"block": {
+																		"id": 165,
+																		"nodeType": "Block",
+																		"src": "1586:339:3",
+																		"statements": [
+																			{
+																				"condition": {
+																					"commonType": {
+																						"typeIdentifier": "t_bool",
+																						"typeString": "bool"
+																					},
+																					"id": 148,
+																					"isConstant": false,
+																					"isLValue": false,
+																					"isPure": false,
+																					"lValueRequested": false,
+																					"leftExpression": {
+																						"commonType": {
+																							"typeIdentifier": "t_bool",
+																							"typeString": "bool"
+																						},
+																						"id": 144,
+																						"isConstant": false,
+																						"isLValue": false,
+																						"isPure": false,
+																						"lValueRequested": false,
+																						"leftExpression": {
+																							"commonType": {
+																								"typeIdentifier": "t_address",
+																								"typeString": "address"
+																							},
+																							"id": 140,
+																							"isConstant": false,
+																							"isLValue": false,
+																							"isPure": false,
+																							"lValueRequested": false,
+																							"leftExpression": {
+																								"id": 135,
+																								"name": "receiver",
+																								"nodeType": "Identifier",
+																								"overloadedDeclarations": [],
+																								"referencedDeclaration": 131,
+																								"src": "1682:8:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_address",
+																									"typeString": "address"
+																								}
+																							},
+																							"nodeType": "BinaryOperation",
+																							"operator": "!=",
+																							"rightExpression": {
+																								"arguments": [
+																									{
+																										"hexValue": "30",
+																										"id": 138,
+																										"isConstant": false,
+																										"isLValue": false,
+																										"isPure": true,
+																										"kind": "number",
+																										"lValueRequested": false,
+																										"nodeType": "Literal",
+																										"src": "1702:1:3",
+																										"typeDescriptions": {
+																											"typeIdentifier": "t_rational_0_by_1",
+																											"typeString": "int_const 0"
+																										},
+																										"value": "0"
+																									}
+																								],
+																								"expression": {
+																									"argumentTypes": [
+																										{
+																											"typeIdentifier": "t_rational_0_by_1",
+																											"typeString": "int_const 0"
+																										}
+																									],
+																									"id": 137,
+																									"isConstant": false,
+																									"isLValue": false,
+																									"isPure": true,
+																									"lValueRequested": false,
+																									"nodeType": "ElementaryTypeNameExpression",
+																									"src": "1694:7:3",
+																									"typeDescriptions": {
+																										"typeIdentifier": "t_type$_t_address_$",
+																										"typeString": "type(address)"
+																									},
+																									"typeName": {
+																										"id": 136,
+																										"name": "address",
+																										"nodeType": "ElementaryTypeName",
+																										"src": "1694:7:3",
+																										"typeDescriptions": {}
+																									}
+																								},
+																								"id": 139,
+																								"isConstant": false,
+																								"isLValue": false,
+																								"isPure": true,
+																								"kind": "typeConversion",
+																								"lValueRequested": false,
+																								"nameLocations": [],
+																								"names": [],
+																								"nodeType": "FunctionCall",
+																								"src": "1694:10:3",
+																								"tryCall": false,
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_address",
+																									"typeString": "address"
+																								}
+																							},
+																							"src": "1682:22:3",
+																							"typeDescriptions": {
+																								"typeIdentifier": "t_bool",
+																								"typeString": "bool"
+																							}
+																						},
+																						"nodeType": "BinaryOperation",
+																						"operator": "&&",
+																						"rightExpression": {
+																							"commonType": {
+																								"typeIdentifier": "t_uint256",
+																								"typeString": "uint256"
+																							},
+																							"id": 143,
+																							"isConstant": false,
+																							"isLValue": false,
+																							"isPure": false,
+																							"lValueRequested": false,
+																							"leftExpression": {
+																								"id": 141,
+																								"name": "royaltyAmount",
+																								"nodeType": "Identifier",
+																								"overloadedDeclarations": [],
+																								"referencedDeclaration": 133,
+																								"src": "1708:13:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_uint256",
+																									"typeString": "uint256"
+																								}
+																							},
+																							"nodeType": "BinaryOperation",
+																							"operator": ">",
+																							"rightExpression": {
+																								"hexValue": "30",
+																								"id": 142,
+																								"isConstant": false,
+																								"isLValue": false,
+																								"isPure": true,
+																								"kind": "number",
+																								"lValueRequested": false,
+																								"nodeType": "Literal",
+																								"src": "1724:1:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_rational_0_by_1",
+																									"typeString": "int_const 0"
+																								},
+																								"value": "0"
+																							},
+																							"src": "1708:17:3",
+																							"typeDescriptions": {
+																								"typeIdentifier": "t_bool",
+																								"typeString": "bool"
+																							}
+																						},
+																						"src": "1682:43:3",
+																						"typeDescriptions": {
+																							"typeIdentifier": "t_bool",
+																							"typeString": "bool"
+																						}
+																					},
+																					"nodeType": "BinaryOperation",
+																					"operator": "&&",
+																					"rightExpression": {
+																						"commonType": {
+																							"typeIdentifier": "t_uint256",
+																							"typeString": "uint256"
+																						},
+																						"id": 147,
+																						"isConstant": false,
+																						"isLValue": false,
+																						"isPure": false,
+																						"lValueRequested": false,
+																						"leftExpression": {
+																							"id": 145,
+																							"name": "royaltyAmount",
+																							"nodeType": "Identifier",
+																							"overloadedDeclarations": [],
+																							"referencedDeclaration": 133,
+																							"src": "1729:13:3",
+																							"typeDescriptions": {
+																								"typeIdentifier": "t_uint256",
+																								"typeString": "uint256"
+																							}
+																						},
+																						"nodeType": "BinaryOperation",
+																						"operator": "<=",
+																						"rightExpression": {
+																							"id": 146,
+																							"name": "salePrice",
+																							"nodeType": "Identifier",
+																							"overloadedDeclarations": [],
+																							"referencedDeclaration": 106,
+																							"src": "1746:9:3",
+																							"typeDescriptions": {
+																								"typeIdentifier": "t_uint256",
+																								"typeString": "uint256"
+																							}
+																						},
+																						"src": "1729:26:3",
+																						"typeDescriptions": {
+																							"typeIdentifier": "t_bool",
+																							"typeString": "bool"
+																						}
+																					},
+																					"src": "1682:73:3",
+																					"typeDescriptions": {
+																						"typeIdentifier": "t_bool",
+																						"typeString": "bool"
+																					}
+																				},
+																				"id": 164,
+																				"nodeType": "IfStatement",
+																				"src": "1678:232:3",
+																				"trueBody": {
+																					"id": 163,
+																					"nodeType": "Block",
+																					"src": "1757:153:3",
+																					"statements": [
+																						{
+																							"expression": {
+																								"id": 153,
+																								"isConstant": false,
+																								"isLValue": false,
+																								"isPure": false,
+																								"lValueRequested": false,
+																								"leftHandSide": {
+																									"expression": {
+																										"id": 149,
+																										"name": "info",
+																										"nodeType": "Identifier",
+																										"overloadedDeclarations": [],
+																										"referencedDeclaration": 112,
+																										"src": "1780:4:3",
+																										"typeDescriptions": {
+																											"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+																											"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+																										}
+																									},
+																									"id": 151,
+																									"isConstant": false,
+																									"isLValue": true,
+																									"isPure": false,
+																									"lValueRequested": true,
+																									"memberLocation": "1785:8:3",
+																									"memberName": "receiver",
+																									"nodeType": "MemberAccess",
+																									"referencedDeclaration": 96,
+																									"src": "1780:13:3",
+																									"typeDescriptions": {
+																										"typeIdentifier": "t_address",
+																										"typeString": "address"
+																									}
+																								},
+																								"nodeType": "Assignment",
+																								"operator": "=",
+																								"rightHandSide": {
+																									"id": 152,
+																									"name": "receiver",
+																									"nodeType": "Identifier",
+																									"overloadedDeclarations": [],
+																									"referencedDeclaration": 131,
+																									"src": "1796:8:3",
+																									"typeDescriptions": {
+																										"typeIdentifier": "t_address",
+																										"typeString": "address"
+																									}
+																								},
+																								"src": "1780:24:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_address",
+																									"typeString": "address"
+																								}
+																							},
+																							"id": 154,
+																							"nodeType": "ExpressionStatement",
+																							"src": "1780:24:3"
+																						},
+																						{
+																							"expression": {
+																								"id": 159,
+																								"isConstant": false,
+																								"isLValue": false,
+																								"isPure": false,
+																								"lValueRequested": false,
+																								"leftHandSide": {
+																									"expression": {
+																										"id": 155,
+																										"name": "info",
+																										"nodeType": "Identifier",
+																										"overloadedDeclarations": [],
+																										"referencedDeclaration": 112,
+																										"src": "1827:4:3",
+																										"typeDescriptions": {
+																											"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+																											"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+																										}
+																									},
+																									"id": 157,
+																									"isConstant": false,
+																									"isLValue": true,
+																									"isPure": false,
+																									"lValueRequested": true,
+																									"memberLocation": "1832:6:3",
+																									"memberName": "amount",
+																									"nodeType": "MemberAccess",
+																									"referencedDeclaration": 98,
+																									"src": "1827:11:3",
+																									"typeDescriptions": {
+																										"typeIdentifier": "t_uint256",
+																										"typeString": "uint256"
+																									}
+																								},
+																								"nodeType": "Assignment",
+																								"operator": "=",
+																								"rightHandSide": {
+																									"id": 158,
+																									"name": "royaltyAmount",
+																									"nodeType": "Identifier",
+																									"overloadedDeclarations": [],
+																									"referencedDeclaration": 133,
+																									"src": "1843:13:3",
+																									"typeDescriptions": {
+																										"typeIdentifier": "t_uint256",
+																										"typeString": "uint256"
+																									}
+																								},
+																								"src": "1827:29:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_uint256",
+																									"typeString": "uint256"
+																								}
+																							},
+																							"id": 160,
+																							"nodeType": "ExpressionStatement",
+																							"src": "1827:29:3"
+																						},
+																						{
+																							"expression": {
+																								"id": 161,
+																								"name": "info",
+																								"nodeType": "Identifier",
+																								"overloadedDeclarations": [],
+																								"referencedDeclaration": 112,
+																								"src": "1886:4:3",
+																								"typeDescriptions": {
+																									"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+																									"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+																								}
+																							},
+																							"functionReturnParameters": 113,
+																							"id": 162,
+																							"nodeType": "Return",
+																							"src": "1879:11:3"
+																						}
+																					]
+																				}
+																			}
+																		]
+																	},
+																	"errorName": "",
+																	"id": 166,
+																	"nodeType": "TryCatchClause",
+																	"parameters": {
+																		"id": 134,
+																		"nodeType": "ParameterList",
+																		"parameters": [
+																			{
+																				"constant": false,
+																				"id": 131,
+																				"mutability": "mutable",
+																				"name": "receiver",
+																				"nameLocation": "1522:8:3",
+																				"nodeType": "VariableDeclaration",
+																				"scope": 166,
+																				"src": "1514:16:3",
+																				"stateVariable": false,
+																				"storageLocation": "default",
+																				"typeDescriptions": {
+																					"typeIdentifier": "t_address",
+																					"typeString": "address"
+																				},
+																				"typeName": {
+																					"id": 130,
+																					"name": "address",
+																					"nodeType": "ElementaryTypeName",
+																					"src": "1514:7:3",
+																					"stateMutability": "nonpayable",
+																					"typeDescriptions": {
+																						"typeIdentifier": "t_address",
+																						"typeString": "address"
+																					}
+																				},
+																				"visibility": "internal"
+																			},
+																			{
+																				"constant": false,
+																				"id": 133,
+																				"mutability": "mutable",
+																				"name": "royaltyAmount",
+																				"nameLocation": "1557:13:3",
+																				"nodeType": "VariableDeclaration",
+																				"scope": 166,
+																				"src": "1549:21:3",
+																				"stateVariable": false,
+																				"storageLocation": "default",
+																				"typeDescriptions": {
+																					"typeIdentifier": "t_uint256",
+																					"typeString": "uint256"
+																				},
+																				"typeName": {
+																					"id": 132,
+																					"name": "uint256",
+																					"nodeType": "ElementaryTypeName",
+																					"src": "1549:7:3",
+																					"typeDescriptions": {
+																						"typeIdentifier": "t_uint256",
+																						"typeString": "uint256"
+																					}
+																				},
+																				"visibility": "internal"
+																			}
+																		],
+																		"src": "1495:90:3"
+																	},
+																	"src": "1487:438:3"
+																},
+																{
+																	"block": {
+																		"id": 167,
+																		"nodeType": "Block",
+																		"src": "1932:71:3",
+																		"statements": []
+																	},
+																	"errorName": "",
+																	"id": 168,
+																	"nodeType": "TryCatchClause",
+																	"src": "1926:77:3"
+																}
+															],
+															"externalCall": {
+																"arguments": [
+																	{
+																		"id": 127,
+																		"name": "tokenId",
+																		"nodeType": "Identifier",
+																		"overloadedDeclarations": [],
+																		"referencedDeclaration": 104,
+																		"src": "1467:7:3",
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_uint256",
+																			"typeString": "uint256"
+																		}
+																	},
+																	{
+																		"id": 128,
+																		"name": "salePrice",
+																		"nodeType": "Identifier",
+																		"overloadedDeclarations": [],
+																		"referencedDeclaration": 106,
+																		"src": "1476:9:3",
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_uint256",
+																			"typeString": "uint256"
+																		}
+																	}
+																],
+																"expression": {
+																	"argumentTypes": [
+																		{
+																			"typeIdentifier": "t_uint256",
+																			"typeString": "uint256"
+																		},
+																		{
+																			"typeIdentifier": "t_uint256",
+																			"typeString": "uint256"
+																		}
+																	],
+																	"expression": {
+																		"arguments": [
+																			{
+																				"id": 124,
+																				"name": "nftContract",
+																				"nodeType": "Identifier",
+																				"overloadedDeclarations": [],
+																				"referencedDeclaration": 102,
+																				"src": "1442:11:3",
+																				"typeDescriptions": {
+																					"typeIdentifier": "t_address",
+																					"typeString": "address"
+																				}
+																			}
+																		],
+																		"expression": {
+																			"argumentTypes": [
+																				{
+																					"typeIdentifier": "t_address",
+																					"typeString": "address"
+																				}
+																			],
+																			"id": 123,
+																			"name": "IERC2981",
+																			"nodeType": "Identifier",
+																			"overloadedDeclarations": [],
+																			"referencedDeclaration": 31,
+																			"src": "1433:8:3",
+																			"typeDescriptions": {
+																				"typeIdentifier": "t_type$_t_contract$_IERC2981_$31_$",
+																				"typeString": "type(contract IERC2981)"
+																			}
+																		},
+																		"id": 125,
+																		"isConstant": false,
+																		"isLValue": false,
+																		"isPure": false,
+																		"kind": "typeConversion",
+																		"lValueRequested": false,
+																		"nameLocations": [],
+																		"names": [],
+																		"nodeType": "FunctionCall",
+																		"src": "1433:21:3",
+																		"tryCall": false,
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_contract$_IERC2981_$31",
+																			"typeString": "contract IERC2981"
+																		}
+																	},
+																	"id": 126,
+																	"isConstant": false,
+																	"isLValue": false,
+																	"isPure": false,
+																	"lValueRequested": false,
+																	"memberLocation": "1455:11:3",
+																	"memberName": "royaltyInfo",
+																	"nodeType": "MemberAccess",
+																	"referencedDeclaration": 30,
+																	"src": "1433:33:3",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_function_external_view$_t_uint256_$_t_uint256_$returns$_t_address_$_t_uint256_$",
+																		"typeString": "function (uint256,uint256) view external returns (address,uint256)"
+																	}
+																},
+																"id": 129,
+																"isConstant": false,
+																"isLValue": false,
+																"isPure": false,
+																"kind": "functionCall",
+																"lValueRequested": false,
+																"nameLocations": [],
+																"names": [],
+																"nodeType": "FunctionCall",
+																"src": "1433:53:3",
+																"tryCall": true,
+																"typeDescriptions": {
+																	"typeIdentifier": "t_tuple$_t_address_$_t_uint256_$",
+																	"typeString": "tuple(address,uint256)"
+																}
+															},
+															"id": 169,
+															"nodeType": "TryStatement",
+															"src": "1429:574:3"
+														}
+													]
+												}
+											},
+											{
+												"expression": {
+													"id": 176,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"lValueRequested": false,
+													"leftHandSide": {
+														"expression": {
+															"id": 172,
+															"name": "info",
+															"nodeType": "Identifier",
+															"overloadedDeclarations": [],
+															"referencedDeclaration": 112,
+															"src": "2084:4:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+																"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+															}
+														},
+														"id": 174,
+														"isConstant": false,
+														"isLValue": true,
+														"isPure": false,
+														"lValueRequested": true,
+														"memberLocation": "2089:8:3",
+														"memberName": "receiver",
+														"nodeType": "MemberAccess",
+														"referencedDeclaration": 96,
+														"src": "2084:13:3",
+														"typeDescriptions": {
+															"typeIdentifier": "t_address",
+															"typeString": "address"
+														}
+													},
+													"nodeType": "Assignment",
+													"operator": "=",
+													"rightHandSide": {
+														"id": 175,
+														"name": "defaultReceiver",
+														"nodeType": "Identifier",
+														"overloadedDeclarations": [],
+														"referencedDeclaration": 108,
+														"src": "2100:15:3",
+														"typeDescriptions": {
+															"typeIdentifier": "t_address",
+															"typeString": "address"
+														}
+													},
+													"src": "2084:31:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													}
+												},
+												"id": 177,
+												"nodeType": "ExpressionStatement",
+												"src": "2084:31:3"
+											},
+											{
+												"condition": {
+													"commonType": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													},
+													"id": 183,
+													"isConstant": false,
+													"isLValue": false,
+													"isPure": false,
+													"lValueRequested": false,
+													"leftExpression": {
+														"id": 178,
+														"name": "defaultReceiver",
+														"nodeType": "Identifier",
+														"overloadedDeclarations": [],
+														"referencedDeclaration": 108,
+														"src": "2183:15:3",
+														"typeDescriptions": {
+															"typeIdentifier": "t_address",
+															"typeString": "address"
+														}
+													},
+													"nodeType": "BinaryOperation",
+													"operator": "!=",
+													"rightExpression": {
+														"arguments": [
+															{
+																"hexValue": "30",
+																"id": 181,
+																"isConstant": false,
+																"isLValue": false,
+																"isPure": true,
+																"kind": "number",
+																"lValueRequested": false,
+																"nodeType": "Literal",
+																"src": "2210:1:3",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_rational_0_by_1",
+																	"typeString": "int_const 0"
+																},
+																"value": "0"
+															}
+														],
+														"expression": {
+															"argumentTypes": [
+																{
+																	"typeIdentifier": "t_rational_0_by_1",
+																	"typeString": "int_const 0"
+																}
+															],
+															"id": 180,
+															"isConstant": false,
+															"isLValue": false,
+															"isPure": true,
+															"lValueRequested": false,
+															"nodeType": "ElementaryTypeNameExpression",
+															"src": "2202:7:3",
+															"typeDescriptions": {
+																"typeIdentifier": "t_type$_t_address_$",
+																"typeString": "type(address)"
+															},
+															"typeName": {
+																"id": 179,
+																"name": "address",
+																"nodeType": "ElementaryTypeName",
+																"src": "2202:7:3",
+																"typeDescriptions": {}
+															}
+														},
+														"id": 182,
+														"isConstant": false,
+														"isLValue": false,
+														"isPure": true,
+														"kind": "typeConversion",
+														"lValueRequested": false,
+														"nameLocations": [],
+														"names": [],
+														"nodeType": "FunctionCall",
+														"src": "2202:10:3",
+														"tryCall": false,
+														"typeDescriptions": {
+															"typeIdentifier": "t_address",
+															"typeString": "address"
+														}
+													},
+													"src": "2183:29:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_bool",
+														"typeString": "bool"
+													}
+												},
+												"id": 196,
+												"nodeType": "IfStatement",
+												"src": "2179:145:3",
+												"trueBody": {
+													"id": 195,
+													"nodeType": "Block",
+													"src": "2214:110:3",
+													"statements": [
+														{
+															"expression": {
+																"id": 193,
+																"isConstant": false,
+																"isLValue": false,
+																"isPure": false,
+																"lValueRequested": false,
+																"leftHandSide": {
+																	"expression": {
+																		"id": 184,
+																		"name": "info",
+																		"nodeType": "Identifier",
+																		"overloadedDeclarations": [],
+																		"referencedDeclaration": 112,
+																		"src": "2229:4:3",
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+																			"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+																		}
+																	},
+																	"id": 186,
+																	"isConstant": false,
+																	"isLValue": true,
+																	"isPure": false,
+																	"lValueRequested": true,
+																	"memberLocation": "2234:6:3",
+																	"memberName": "amount",
+																	"nodeType": "MemberAccess",
+																	"referencedDeclaration": 98,
+																	"src": "2229:11:3",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_uint256",
+																		"typeString": "uint256"
+																	}
+																},
+																"nodeType": "Assignment",
+																"operator": "=",
+																"rightHandSide": {
+																	"commonType": {
+																		"typeIdentifier": "t_uint256",
+																		"typeString": "uint256"
+																	},
+																	"id": 192,
+																	"isConstant": false,
+																	"isLValue": false,
+																	"isPure": false,
+																	"lValueRequested": false,
+																	"leftExpression": {
+																		"components": [
+																			{
+																				"commonType": {
+																					"typeIdentifier": "t_uint256",
+																					"typeString": "uint256"
+																				},
+																				"id": 189,
+																				"isConstant": false,
+																				"isLValue": false,
+																				"isPure": false,
+																				"lValueRequested": false,
+																				"leftExpression": {
+																					"id": 187,
+																					"name": "salePrice",
+																					"nodeType": "Identifier",
+																					"overloadedDeclarations": [],
+																					"referencedDeclaration": 106,
+																					"src": "2244:9:3",
+																					"typeDescriptions": {
+																						"typeIdentifier": "t_uint256",
+																						"typeString": "uint256"
+																					}
+																				},
+																				"nodeType": "BinaryOperation",
+																				"operator": "*",
+																				"rightExpression": {
+																					"id": 188,
+																					"name": "DEFAULT_ROYALTY_BASIS_POINTS",
+																					"nodeType": "Identifier",
+																					"overloadedDeclarations": [],
+																					"referencedDeclaration": 91,
+																					"src": "2256:28:3",
+																					"typeDescriptions": {
+																						"typeIdentifier": "t_uint96",
+																						"typeString": "uint96"
+																					}
+																				},
+																				"src": "2244:40:3",
+																				"typeDescriptions": {
+																					"typeIdentifier": "t_uint256",
+																					"typeString": "uint256"
+																				}
+																			}
+																		],
+																		"id": 190,
+																		"isConstant": false,
+																		"isInlineArray": false,
+																		"isLValue": false,
+																		"isPure": false,
+																		"lValueRequested": false,
+																		"nodeType": "TupleExpression",
+																		"src": "2243:42:3",
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_uint256",
+																			"typeString": "uint256"
+																		}
+																	},
+																	"nodeType": "BinaryOperation",
+																	"operator": "/",
+																	"rightExpression": {
+																		"id": 191,
+																		"name": "MAX_ROYALTY_BASIS_POINTS",
+																		"nodeType": "Identifier",
+																		"overloadedDeclarations": [],
+																		"referencedDeclaration": 94,
+																		"src": "2288:24:3",
+																		"typeDescriptions": {
+																			"typeIdentifier": "t_uint96",
+																			"typeString": "uint96"
+																		}
+																	},
+																	"src": "2243:69:3",
+																	"typeDescriptions": {
+																		"typeIdentifier": "t_uint256",
+																		"typeString": "uint256"
+																	}
+																},
+																"src": "2229:83:3",
+																"typeDescriptions": {
+																	"typeIdentifier": "t_uint256",
+																	"typeString": "uint256"
+																}
+															},
+															"id": 194,
+															"nodeType": "ExpressionStatement",
+															"src": "2229:83:3"
+														}
+													]
+												}
+											},
+											{
+												"expression": {
+													"id": 197,
+													"name": "info",
+													"nodeType": "Identifier",
+													"overloadedDeclarations": [],
+													"referencedDeclaration": 112,
+													"src": "2341:4:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+														"typeString": "struct RoyaltyEngine.RoyaltyInfo memory"
+													}
+												},
+												"functionReturnParameters": 113,
+												"id": 198,
+												"nodeType": "Return",
+												"src": "2334:11:3"
+											}
+										]
+									},
+									"documentation": {
+										"id": 100,
+										"nodeType": "StructuredDocumentation",
+										"src": "654:292:3",
+										"text": " @notice Get royalty info for a sale.\n @param nftContract       Collection contract address.\n @param tokenId           Token ID being sold.\n @param salePrice         Total sale price.\n @param defaultReceiver   Who to pay if no ERC-2981 support."
+									},
+									"id": 200,
+									"implemented": true,
+									"kind": "function",
+									"modifiers": [],
+									"name": "getRoyalty",
+									"nameLocation": "961:10:3",
+									"nodeType": "FunctionDefinition",
+									"parameters": {
+										"id": 109,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 102,
+												"mutability": "mutable",
+												"name": "nftContract",
+												"nameLocation": "990:11:3",
+												"nodeType": "VariableDeclaration",
+												"scope": 200,
+												"src": "982:19:3",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_address",
+													"typeString": "address"
+												},
+												"typeName": {
+													"id": 101,
+													"name": "address",
+													"nodeType": "ElementaryTypeName",
+													"src": "982:7:3",
+													"stateMutability": "nonpayable",
+													"typeDescriptions": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 104,
+												"mutability": "mutable",
+												"name": "tokenId",
+												"nameLocation": "1020:7:3",
+												"nodeType": "VariableDeclaration",
+												"scope": 200,
+												"src": "1012:15:3",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												},
+												"typeName": {
+													"id": 103,
+													"name": "uint256",
+													"nodeType": "ElementaryTypeName",
+													"src": "1012:7:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_uint256",
+														"typeString": "uint256"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 106,
+												"mutability": "mutable",
+												"name": "salePrice",
+												"nameLocation": "1046:9:3",
+												"nodeType": "VariableDeclaration",
+												"scope": 200,
+												"src": "1038:17:3",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_uint256",
+													"typeString": "uint256"
+												},
+												"typeName": {
+													"id": 105,
+													"name": "uint256",
+													"nodeType": "ElementaryTypeName",
+													"src": "1038:7:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_uint256",
+														"typeString": "uint256"
+													}
+												},
+												"visibility": "internal"
+											},
+											{
+												"constant": false,
+												"id": 108,
+												"mutability": "mutable",
+												"name": "defaultReceiver",
+												"nameLocation": "1074:15:3",
+												"nodeType": "VariableDeclaration",
+												"scope": 200,
+												"src": "1066:23:3",
+												"stateVariable": false,
+												"storageLocation": "default",
+												"typeDescriptions": {
+													"typeIdentifier": "t_address",
+													"typeString": "address"
+												},
+												"typeName": {
+													"id": 107,
+													"name": "address",
+													"nodeType": "ElementaryTypeName",
+													"src": "1066:7:3",
+													"stateMutability": "nonpayable",
+													"typeDescriptions": {
+														"typeIdentifier": "t_address",
+														"typeString": "address"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "971:125:3"
+									},
+									"returnParameters": {
+										"id": 113,
+										"nodeType": "ParameterList",
+										"parameters": [
+											{
+												"constant": false,
+												"id": 112,
+												"mutability": "mutable",
+												"name": "info",
+												"nameLocation": "1139:4:3",
+												"nodeType": "VariableDeclaration",
+												"scope": 200,
+												"src": "1120:23:3",
+												"stateVariable": false,
+												"storageLocation": "memory",
+												"typeDescriptions": {
+													"typeIdentifier": "t_struct$_RoyaltyInfo_$99_memory_ptr",
+													"typeString": "struct RoyaltyEngine.RoyaltyInfo"
+												},
+												"typeName": {
+													"id": 111,
+													"nodeType": "UserDefinedTypeName",
+													"pathNode": {
+														"id": 110,
+														"name": "RoyaltyInfo",
+														"nameLocations": [
+															"1120:11:3"
+														],
+														"nodeType": "IdentifierPath",
+														"referencedDeclaration": 99,
+														"src": "1120:11:3"
+													},
+													"referencedDeclaration": 99,
+													"src": "1120:11:3",
+													"typeDescriptions": {
+														"typeIdentifier": "t_struct$_RoyaltyInfo_$99_storage_ptr",
+														"typeString": "struct RoyaltyEngine.RoyaltyInfo"
+													}
+												},
+												"visibility": "internal"
+											}
+										],
+										"src": "1119:25:3"
+									},
+									"scope": 201,
+									"src": "952:1401:3",
+									"stateMutability": "view",
+									"virtual": false,
+									"visibility": "internal"
+								}
+							],
+							"scope": 202,
+							"src": "241:2115:3",
+							"usedErrors": [],
+							"usedEvents": []
+						}
+					],
+					"src": "33:2325:3"
+				},
+				"id": 3
+			}
+		}
+	}
+}

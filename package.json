@@ -1,0 +1,52 @@
+{
+  "name": "@rarebay/v2-core",
+  "description": "🎛 Core contracts for the RareBayV2 protocol",
+  "version": "1.0.1",
+  "homepage": "https://rarebay.xyz",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [
+    "RareBay",
+    "CORE",
+    "v2",
+    "core",
+    "RareBay-v2"
+  ],
+  "files": [
+    "contracts",
+    "build"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "clean": "rimraf ./build/",
+    "compile": "npx hardhat compile",
+    "pretest": "yarn compile",
+    "test": "npx hardhat test",
+    "prepublishOnly": "yarn test"
+  },
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "@openzeppelin/contracts-upgradeable": "^5.0.2",
+    "hardhat": "^2.22.3",
+    "crypto-js": "^4.2.0",
+    "prettier": "^3.2.5",
+    "prompt-sync": "^4.2.0",
+    "thirdweb": "^5.87.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5",
+    "web3": "^4.16.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/fs-extra": "^11.0.4",
+    "@types/inquirer": "^9.0.8",
+    "fs-extra": "^11.3.0",
+    "rimraf": "^3.0.0"
+  }
+}
