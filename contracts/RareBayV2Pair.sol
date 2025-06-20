@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./RareBayV2ERC20.sol";
-import "./libraries/Math.sol";
-import "./libraries/UQ112x112.sol";
-import "./interfaces/IERC20.sol";
-import "./interfaces/IRareBayV2Factory.sol";
-import "./PriceOracle.sol";
+import './RareBayV2ERC20.sol';
+import './libraries/Math.sol';
+import './libraries/UQ112x112.sol';
+import './interfaces/IERC20.sol';
+import './interfaces/IRareBayV2Factory.sol';
+import './PriceOracle.sol';
 
 /*
 ██████╗  █████╗ ██████╗ ███████╗██████╗  █████╗ ██╗   ██╗
@@ -26,7 +26,7 @@ contract RareBayV2Pair is RareBayV2ERC20 {
     using UQ112x112 for uint224;
 
     // **** CONSTANTS ****
-    uint public constant MINIMUM_LIQUIDITY = 10**3;
+    uint public constant MINIMUM_LIQUIDITY = 10 ** 3;
     uint private constant FEE_DENOMINATOR = 10000;
     uint public fixedFee = 50; // fixed fee of 0.5%
     uint public adjustableFee; // owner-settable fee (in basis points), allowed between 10 and 50
@@ -36,10 +36,11 @@ contract RareBayV2Pair is RareBayV2ERC20 {
     address public token0;
     address public token1;
     address public owner; // pool owner
-
-    uint112 private reserve0;  // current reserve of token0
-    uint112 private reserve1;  // current reserve of token1
-    uint32  private blockTimestampLast; // last block timestamp
+    address public usdt;
+    event USDTAddressUpdated(address indexed newUSDT);
+    uint112 private reserve0; // current reserve of token0
+    uint112 private reserve1; // current reserve of token1
+    uint32 private blockTimestampLast; // last block timestamp
 
     uint public price0CumulativeLast;
     uint public price1CumulativeLast;
@@ -48,12 +49,12 @@ contract RareBayV2Pair is RareBayV2ERC20 {
     // **** Fee & Dividend Variables (Extended lock period: 2 weeks) ****
     uint256 public dividendPerToken0Stored;
     uint256 public dividendPerToken1Stored;
-    uint256 constant internal POINTS_MULTIPLIER = 1e32;
+    uint256 internal constant POINTS_MULTIPLIER = 1e32;
     mapping(address => uint256) public userDividendPerToken0Paid;
     mapping(address => uint256) public userDividendPerToken1Paid;
     mapping(address => uint256) public pendingDividends0;
     mapping(address => uint256) public pendingDividends1;
-    mapping(address => uint256) public dividendLockTime;  // lock timestamp per LP
+    mapping(address => uint256) public dividendLockTime; // lock timestamp per LP
 
     uint256 public ownerReward0;
     uint256 public ownerReward1;
@@ -67,11 +68,18 @@ contract RareBayV2Pair is RareBayV2ERC20 {
 
     // **** Price Oracle ****
     PriceOracle public priceOracle;
-    
+
     // **** EVENTS ****
     event Mint(address indexed sender, uint amount0, uint amount1);
     event Burn(address indexed sender, uint amount0, uint amount1, address indexed to);
-    event Swap(address indexed sender, uint amount0In, uint amount1In, uint amount0Out, uint amount1Out, address indexed to);
+    event Swap(
+        address indexed sender,
+        uint amount0In,
+        uint amount1In,
+        uint amount0Out,
+        uint amount1Out,
+        address indexed to
+    );
     event Sync(uint112 reserve0, uint112 reserve1);
     event AdjustFee(uint newAdjustableFee);
     event OwnerRewardsWithdrawn(uint amount0, uint amount1);
@@ -80,13 +88,13 @@ contract RareBayV2Pair is RareBayV2ERC20 {
 
     uint private unlocked = 1;
     modifier lock() {
-        require(unlocked == 1, "RareBayV2: LOCKED");
+        require(unlocked == 1, 'RareBayV2: LOCKED');
         unlocked = 0;
         _;
         unlocked = 1;
     }
     modifier onlyOwner() {
-        require(msg.sender == owner, "RareBayV2: NOT_OWNER");
+        require(msg.sender == owner, 'RareBayV2: NOT_OWNER');
         _;
     }
 
@@ -95,6 +103,7 @@ contract RareBayV2Pair is RareBayV2ERC20 {
         factory = msg.sender;
         owner = msg.sender;
         adjustableFee = 10; // default adjustable fee = 0.1%
+        usdt = 0xadAF5CC54ab7F0a254F2773fD9066C44b5D74078;
     }
 
     /**
@@ -106,70 +115,84 @@ contract RareBayV2Pair is RareBayV2ERC20 {
         emit PriceOracleSet(_priceOracle);
     }
 
+    function setUSDTAddress(address _usdt) external onlyOwner {
+        require(_usdt != address(0), 'RareBayV2: INVALID_USDT_ADDRESS');
+        usdt = _usdt;
+        emit USDTAddressUpdated(_usdt);
+    }
+
     // Called once by the factory at deployment.
     function initialize(address _token0, address _token1) external {
-        require(msg.sender == factory, "RareBayV2: FORBIDDEN");
+        require(msg.sender == factory, 'RareBayV2: FORBIDDEN');
         token0 = _token0;
         token1 = _token1;
     }
 
-        /**
+    /**
      * @notice Returns the price of a token in USDT, calculated using reserves.
      * @param token The address of the token to get the price for.
      * @return price The price of the token in USDT (scaled by 1e18 for precision).
      */
-    function getTokenPriceInUSDT(address token) external view returns (uint price) {
-        require(token == token0 || token == token1, "RareBayV2: TOKEN_NOT_IN_PAIR");
 
-        (uint112 _reserve0, uint112 _reserve1, ) = getReserves();
+function getTokenPriceInUSDT(address token) external view returns (uint price) {
+    require(token == token0 || token == token1, 'RareBayV2: TOKEN_NOT_IN_PAIR');
 
-        // Determine if USDT is in the pair
-        address usdt = 0x809F26F719c0Cd95d64A1cbCE6C34B67E1613498; // USDT address
-        require(token0 == usdt || token1 == usdt, "RareBayV2: PAIR_DOES_NOT_INCLUDE_USDT");
+    (uint112 _reserve0, uint112 _reserve1, ) = getReserves();
+    require(token0 == usdt || token1 == usdt, 'RareBayV2: PAIR_DOES_NOT_INCLUDE_USDT');
 
-        if (token0 == usdt) {
-            // USDT is token0, price of token1 in USDT
-            require(_reserve1 > 0, "RareBayV2: INSUFFICIENT_LIQUIDITY");
-            return uint(_reserve0) * 1e18 / _reserve1; // price of token1 in USDT
+    // Define the desired output decimals for the price (USDT has 6 decimals)
+    uint256 USDT_OUTPUT_DECIMALS_FACTOR = 1e6; // 10^6
+
+    if (token0 == usdt) {
+        // USDT is token0, we are calculating the price of token1 in USDT
+        // Price = (Reserve of USDT / Reserve of Token1)
+        // To return this price scaled to USDT's 6 decimals:
+        // Price = (reserve_usdt * 10^6) / reserve_token1
+        require(_reserve1 > 0, 'RareBayV2: INSUFFICIENT_LIQUIDITY');
+        return (uint(_reserve0) * USDT_OUTPUT_DECIMALS_FACTOR) / _reserve1;
+    } else { // token1 == usdt
+        // USDT is token1, we are calculating the price of token0 in USDT
+        // Price = (Reserve of USDT / Reserve of Token0)
+        // Price = (reserve_usdt * 10^6) / reserve_token0
+        require(_reserve0 > 0, 'RareBayV2: INSUFFICIENT_LIQUIDITY');
+        return (uint(_reserve1) * USDT_OUTPUT_DECIMALS_FACTOR) / _reserve0;
+    }
+}
+
+    /**
+     * @notice Swaps an exact amount of input tokens for the calculated output tokens.
+     * @param inputAmount The amount of input tokens to swap.
+     * @param inputToken The address of the input token (must be token0 or token1).
+     * @param outputToken The address of the output token (must be the other token in the pair).
+     * @param to The address to receive the output tokens.
+     */
+    function swapTokens(
+        uint inputAmount,
+        address inputToken,
+        address outputToken,
+        address to,
+        uint amountOutMin
+    ) external {
+        // Add lock modifier here
+        require(inputToken == token0 || inputToken == token1, 'RareBayV2: INVALID_INPUT_TOKEN');
+        require(outputToken == token0 || outputToken == token1, 'RareBayV2: INVALID_OUTPUT_TOKEN');
+        require(inputToken != outputToken, 'RareBayV2: IDENTICAL_TOKENS');
+
+        // Transfer input tokens from the user to the contract
+        IERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
+
+        // Calculate the expected output amount using the current reserves
+        uint amountOut = getAmountOut(inputAmount, inputToken);
+        require(amountOut >= amountOutMin, 'RareBayV2: SLIPPAGE_TOO_HIGH'); // Check slippage
+
+        // Execute the swap with the calculated output amount
+        if (inputToken == token0) {
+            this.swap(0, amountOut, to, ''); // Use this.swap for external call
         } else {
-            // USDT is token1, price of token0 in USDT
-            require(_reserve0 > 0, "RareBayV2: INSUFFICIENT_LIQUIDITY");
-            return uint(_reserve1) * 1e18 / _reserve0; // price of token0 in USDT
+            this.swap(amountOut, 0, to, ''); // Use this.swap for external call
         }
     }
 
-/**
- * @notice Swaps an exact amount of input tokens for the calculated output tokens.
- * @param inputAmount The amount of input tokens to swap.
- * @param inputToken The address of the input token (must be token0 or token1).
- * @param outputToken The address of the output token (must be the other token in the pair).
- * @param to The address to receive the output tokens.
- */
-function swapTokens(
-    uint inputAmount,
-    address inputToken,
-    address outputToken,
-    address to,
-    uint amountOutMin
-) external { // Add lock modifier here
-    require(inputToken == token0 || inputToken == token1, "RareBayV2: INVALID_INPUT_TOKEN");
-    require(outputToken == token0 || outputToken == token1, "RareBayV2: INVALID_OUTPUT_TOKEN");
-    require(inputToken != outputToken, "RareBayV2: IDENTICAL_TOKENS");
-
-    // Transfer input tokens from the user to the contract
-    IERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
-
-    // Calculate the expected output amount using the current reserves
-    uint amountOut = getAmountOut(inputAmount, inputToken);
-    require(amountOut >= amountOutMin, "RareBayV2: SLIPPAGE_TOO_HIGH"); // Check slippage
-
-    // Execute the swap with the calculated output amount
-    if (inputToken == token0) {
-        this.swap(0, amountOut, to, ""); // Use this.swap for external call
-    } else {
-        this.swap(amountOut, 0, to, ""); // Use this.swap for external call
-    }
-}
     /**
      * @notice Returns the current reserves and last block timestamp.
      */
@@ -182,9 +205,9 @@ function swapTokens(
      */
     function _safeTransfer(address token, address to, uint value) private {
         (bool success, bytes memory data) = token.call(
-            abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), to, value)
+            abi.encodeWithSelector(bytes4(keccak256('transfer(address,uint256)')), to, value)
         );
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "RareBayV2: TRANSFER_FAILED");
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'RareBayV2: TRANSFER_FAILED');
     }
 
     // **** FEE & DIVIDEND LOGIC WITH EXTENDED LOCKS ****
@@ -201,41 +224,47 @@ function swapTokens(
         lastTotalFee = adjustableFee.add(fixedFee);
 
         if (amount0In > 0) {
-        // Ensure no overflow in fee calculations
-        uint feeOwner0 = (amount0In * adjustableFee) / FEE_DENOMINATOR;  // Safe as long as FEE_DENOMINATOR > adjustableFee
-        uint feeDividend0 = (amount0In * fixedFee) / FEE_DENOMINATOR;  // Safe as long as FEE_DENOMINATOR > fixedFee
-        
-        // Check for overflow before adding to existing rewards
-        require(ownerReward0 + feeOwner0 >= ownerReward0, "RareBayV2: OWNER_REWARD_OVERFLOW");
-        ownerReward0 += feeOwner0;
+            // Ensure no overflow in fee calculations
+            uint feeOwner0 = (amount0In * adjustableFee) / FEE_DENOMINATOR; // Safe as long as FEE_DENOMINATOR > adjustableFee
+            uint feeDividend0 = (amount0In * fixedFee) / FEE_DENOMINATOR; // Safe as long as FEE_DENOMINATOR > fixedFee
 
-        if (totalSupply > 0) {
-            // Check for overflow in multiplication and division
-            uint256 dividendIncrease = (feeDividend0 * POINTS_MULTIPLIER) / totalSupply;
-            require(dividendPerToken0Stored + dividendIncrease >= dividendPerToken0Stored, "RareBayV2: DIVIDEND_OVERFLOW");
-            dividendPerToken0Stored += dividendIncrease;
+            // Check for overflow before adding to existing rewards
+            require(ownerReward0 + feeOwner0 >= ownerReward0, 'RareBayV2: OWNER_REWARD_OVERFLOW');
+            ownerReward0 += feeOwner0;
+
+            if (totalSupply > 0) {
+                // Check for overflow in multiplication and division
+                uint256 dividendIncrease = (feeDividend0 * POINTS_MULTIPLIER) / totalSupply;
+                require(
+                    dividendPerToken0Stored + dividendIncrease >= dividendPerToken0Stored,
+                    'RareBayV2: DIVIDEND_OVERFLOW'
+                );
+                dividendPerToken0Stored += dividendIncrease;
+            }
         }
-    }
 
-    if (amount1In > 0) {
-        // Similar checks for token1
-        uint feeOwner1 = (amount1In * adjustableFee) / FEE_DENOMINATOR;
-        uint feeDividend1 = (amount1In * fixedFee) / FEE_DENOMINATOR;
-        
-        require(ownerReward1 + feeOwner1 >= ownerReward1, "RareBayV2: OWNER_REWARD_OVERFLOW");
-        ownerReward1 += feeOwner1;
+        if (amount1In > 0) {
+            // Similar checks for token1
+            uint feeOwner1 = (amount1In * adjustableFee) / FEE_DENOMINATOR;
+            uint feeDividend1 = (amount1In * fixedFee) / FEE_DENOMINATOR;
 
-        if (totalSupply > 0) {
-            uint256 dividendIncrease = (feeDividend1 * POINTS_MULTIPLIER) / totalSupply;
-            require(dividendPerToken1Stored + dividendIncrease >= dividendPerToken1Stored, "RareBayV2: DIVIDEND_OVERFLOW");
-            dividendPerToken1Stored += dividendIncrease;
+            require(ownerReward1 + feeOwner1 >= ownerReward1, 'RareBayV2: OWNER_REWARD_OVERFLOW');
+            ownerReward1 += feeOwner1;
+
+            if (totalSupply > 0) {
+                uint256 dividendIncrease = (feeDividend1 * POINTS_MULTIPLIER) / totalSupply;
+                require(
+                    dividendPerToken1Stored + dividendIncrease >= dividendPerToken1Stored,
+                    'RareBayV2: DIVIDEND_OVERFLOW'
+                );
+                dividendPerToken1Stored += dividendIncrease;
+            }
         }
-    }
 
-    // This should be safe as block.timestamp is always increasing and 2 weeks is a reasonable time frame
-    if (block.timestamp >= ownerRewardLockTimestamp) {
-        ownerRewardLockTimestamp = block.timestamp + 2 weeks;
-    }
+        // This should be safe as block.timestamp is always increasing and 2 weeks is a reasonable time frame
+        if (block.timestamp >= ownerRewardLockTimestamp) {
+            ownerRewardLockTimestamp = block.timestamp + 2 weeks;
+        }
     }
 
     /**
@@ -244,12 +273,10 @@ function swapTokens(
      * @param account The liquidity provider's address.
      */
     function _updateAccountDividend(address account) internal {
-        uint256 owing0 = balanceOf[account]
-            .mul(dividendPerToken0Stored - userDividendPerToken0Paid[account])
-            / POINTS_MULTIPLIER;
-        uint256 owing1 = balanceOf[account]
-            .mul(dividendPerToken1Stored - userDividendPerToken1Paid[account])
-            / POINTS_MULTIPLIER;
+        uint256 owing0 = balanceOf[account].mul(dividendPerToken0Stored - userDividendPerToken0Paid[account]) /
+            POINTS_MULTIPLIER;
+        uint256 owing1 = balanceOf[account].mul(dividendPerToken1Stored - userDividendPerToken1Paid[account]) /
+            POINTS_MULTIPLIER;
         if (owing0 > 0 || owing1 > 0) {
             pendingDividends0[account] = pendingDividends0[account].add(owing0);
             pendingDividends1[account] = pendingDividends1[account].add(owing1);
@@ -264,7 +291,7 @@ function swapTokens(
     // **** OWNER FUNCTIONS ****
 
     function setAdjustableFee(uint _fee) external onlyOwner {
-        require(_fee >= 10 && _fee <= 50, "RareBayV2: FEE_OUT_OF_RANGE");
+        require(_fee >= 10 && _fee <= 50, 'RareBayV2: FEE_OUT_OF_RANGE');
         adjustableFee = _fee;
         emit AdjustFee(_fee);
     }
@@ -275,7 +302,7 @@ function swapTokens(
     function withdrawOwnerRewards() external onlyOwner {
         uint256 unlocked0 = _calculateOwnerUnlocked(ownerReward0, ownerWithdrawn0);
         uint256 unlocked1 = _calculateOwnerUnlocked(ownerReward1, ownerWithdrawn1);
-        require(unlocked0 > 0 || unlocked1 > 0, "RareBayV2: NO_UNLOCKED_REWARDS");
+        require(unlocked0 > 0 || unlocked1 > 0, 'RareBayV2: NO_UNLOCKED_REWARDS');
         if (unlocked0 > 0) {
             ownerWithdrawn0 = ownerWithdrawn0.add(unlocked0);
             _safeTransfer(token0, owner, unlocked0);
@@ -306,10 +333,10 @@ function swapTokens(
      */
     function withdrawDividends() external {
         _updateAccountDividend(msg.sender);
-        require(block.timestamp >= dividendLockTime[msg.sender], "RareBayV2: DIVIDENDS_LOCKED");
+        require(block.timestamp >= dividendLockTime[msg.sender], 'RareBayV2: DIVIDENDS_LOCKED');
         uint256 amount0 = pendingDividends0[msg.sender];
         uint256 amount1 = pendingDividends1[msg.sender];
-        require(amount0 > 0 || amount1 > 0, "RareBayV2: NO_DIVIDENDS");
+        require(amount0 > 0 || amount1 > 0, 'RareBayV2: NO_DIVIDENDS');
         pendingDividends0[msg.sender] = 0;
         pendingDividends1[msg.sender] = 0;
         dividendLockTime[msg.sender] = block.timestamp + 2 weeks;
@@ -321,8 +348,8 @@ function swapTokens(
     // **** CORE FUNCTIONS (mint, burn, swap, skim, sync) ****
 
     function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
-        require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, "RareBayV2: OVERFLOW");
-        uint32 _blockTimestamp = uint32(block.timestamp % 2**32);
+        require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, 'RareBayV2: OVERFLOW');
+        uint32 _blockTimestamp = uint32(block.timestamp % 2 ** 32);
         uint32 timeElapsed = _blockTimestamp - blockTimestampLast;
         if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
             price0CumulativeLast += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
@@ -368,32 +395,32 @@ function swapTokens(
 
         bool feeOn = _mintFee(_reserve0, _reserve1);
         uint _totalSupply = totalSupply;
-         if (_totalSupply == 0) {
-        // Here, we need to ensure that the multiplication doesn't overflow before taking the square root
-        uint product = amount0 * amount1;  // This multiplication might overflow, so we'll check
-        require(product / amount0 == amount1, "RareBayV2: MULTIPLICATION_OVERFLOW");  // Check for overflow before sqrt
-        
-        uint sqrtProduct = Math.sqrt(product);
-        require(sqrtProduct >= MINIMUM_LIQUIDITY, "RareBayV2: INSUFFICIENT_LIQUIDITY_FOR_MINIMUM");
-        liquidity = sqrtProduct - MINIMUM_LIQUIDITY;
-        _mint(address(0), MINIMUM_LIQUIDITY);  // This minting is safe due to the check above
-    } else {
-        // For subsequent mints, ensure division doesn't underflow
-        uint liquidity0 = (amount0 * _totalSupply) / _reserve0;
-        uint liquidity1 = (amount1 * _totalSupply) / _reserve1;
-        liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
-    }
-        require(liquidity > 0, "RareBayV2: INSUFFICIENT_LIQUIDITY_MINTED");
+        if (_totalSupply == 0) {
+            // Here, we need to ensure that the multiplication doesn't overflow before taking the square root
+            uint product = amount0 * amount1; // This multiplication might overflow, so we'll check
+            require(product / amount0 == amount1, 'RareBayV2: MULTIPLICATION_OVERFLOW'); // Check for overflow before sqrt
+
+            uint sqrtProduct = Math.sqrt(product);
+            require(sqrtProduct >= MINIMUM_LIQUIDITY, 'RareBayV2: INSUFFICIENT_LIQUIDITY_FOR_MINIMUM');
+            liquidity = sqrtProduct - MINIMUM_LIQUIDITY;
+            _mint(address(0), MINIMUM_LIQUIDITY); // This minting is safe due to the check above
+        } else {
+            // For subsequent mints, ensure division doesn't underflow
+            uint liquidity0 = (amount0 * _totalSupply) / _reserve0;
+            uint liquidity1 = (amount1 * _totalSupply) / _reserve1;
+            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
+        }
+        require(liquidity > 0, 'RareBayV2: INSUFFICIENT_LIQUIDITY_MINTED');
         _updateAccountDividend(to);
         _mint(to, liquidity);
 
         _update(balance0, balance1, _reserve0, _reserve1);
-         if (feeOn) {
-        // Ensure the multiplication for kLast doesn't overflow
-        uint256 newK = uint256(reserve0) * reserve1;
-        require(newK / reserve0 == reserve1, "RareBayV2: K_OVERFLOW");
-        kLast = newK;
-    }
+        if (feeOn) {
+            // Ensure the multiplication for kLast doesn't overflow
+            uint256 newK = uint256(reserve0) * reserve1;
+            require(newK / reserve0 == reserve1, 'RareBayV2: K_OVERFLOW');
+            kLast = newK;
+        }
         emit Mint(msg.sender, amount0, amount1);
     }
 
@@ -414,13 +441,13 @@ function swapTokens(
         bool feeOn = _mintFee(_reserve0, _reserve1);
         uint _totalSupply = totalSupply;
         // Check for division by zero and overflow in multiplication
-        require(_totalSupply > 0, "RareBayV2: TOTAL_SUPPLY_ZERO");
-        require(liquidity <= _totalSupply, "RareBayV2: LIQUIDITY_EXCEEDS_SUPPLY");
-        amount0 = liquidity * balance0 / _totalSupply;
-        amount1 = liquidity * balance1 / _totalSupply;
-        require(amount0 > 0 && amount1 > 0, "RareBayV2: INSUFFICIENT_LIQUIDITY_BURNED");
-         // Check if burning doesn't cause underflow in total supply
-         require(_totalSupply >= liquidity, "RareBayV2: BURN_EXCEEDS_SUPPLY");
+        require(_totalSupply > 0, 'RareBayV2: TOTAL_SUPPLY_ZERO');
+        require(liquidity <= _totalSupply, 'RareBayV2: LIQUIDITY_EXCEEDS_SUPPLY');
+        amount0 = (liquidity * balance0) / _totalSupply;
+        amount1 = (liquidity * balance1) / _totalSupply;
+        require(amount0 > 0 && amount1 > 0, 'RareBayV2: INSUFFICIENT_LIQUIDITY_BURNED');
+        // Check if burning doesn't cause underflow in total supply
+        require(_totalSupply >= liquidity, 'RareBayV2: BURN_EXCEEDS_SUPPLY');
         _updateAccountDividend(msg.sender);
         _burn(address(this), liquidity);
         _safeTransfer(_token0, to, amount0);
@@ -430,11 +457,11 @@ function swapTokens(
 
         _update(balance0, balance1, _reserve0, _reserve1);
         if (feeOn) {
-        // Check for overflow when calculating kLast
-        uint256 newK = uint256(reserve0) * reserve1;
-        require(newK / reserve0 == reserve1, "RareBayV2: K_OVERFLOW");
-        kLast = newK;
-    }
+            // Check for overflow when calculating kLast
+            uint256 newK = uint256(reserve0) * reserve1;
+            require(newK / reserve0 == reserve1, 'RareBayV2: K_OVERFLOW');
+            kLast = newK;
+        }
         emit Burn(msg.sender, amount0, amount1, to);
     }
 
@@ -446,80 +473,80 @@ function swapTokens(
      * @param data Callback data for flash swaps.
      */
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-        require(amount0Out > 0 || amount1Out > 0, "RareBayV2: INSUFFICIENT_OUTPUT_AMOUNT");
+        require(amount0Out > 0 || amount1Out > 0, 'RareBayV2: INSUFFICIENT_OUTPUT_AMOUNT');
         (uint112 _reserve0, uint112 _reserve1, ) = getReserves();
-        require(amount0Out < _reserve0 && amount1Out < _reserve1, "RareBayV2: INSUFFICIENT_LIQUIDITY");
+        require(amount0Out < _reserve0 && amount1Out < _reserve1, 'RareBayV2: INSUFFICIENT_LIQUIDITY');
 
         uint balance0;
         uint balance1;
         {
             address _token0 = token0;
             address _token1 = token1;
-            require(to != _token0 && to != _token1, "RareBayV2: INVALID_TO");
+            require(to != _token0 && to != _token1, 'RareBayV2: INVALID_TO');
             if (amount0Out > 0) _safeTransfer(_token0, to, amount0Out);
             if (amount1Out > 0) _safeTransfer(_token1, to, amount1Out);
-            if (data.length > 0)
-                IRareBayV2Callee(to).RareBayV2Call(msg.sender, amount0Out, amount1Out, data);
+            if (data.length > 0) IRareBayV2Callee(to).RareBayV2Call(msg.sender, amount0Out, amount1Out, data);
             balance0 = IERC20(_token0).balanceOf(address(this));
             balance1 = IERC20(_token1).balanceOf(address(this));
         }
         uint amount0In = balance0 > _reserve0 - amount0Out ? balance0 - (_reserve0 - amount0Out) : 0;
         uint amount1In = balance1 > _reserve1 - amount1Out ? balance1 - (_reserve1 - amount1Out) : 0;
-        require(amount0In > 0 || amount1In > 0, "RareBayV2: INSUFFICIENT_INPUT_AMOUNT");
+        require(amount0In > 0 || amount1In > 0, 'RareBayV2: INSUFFICIENT_INPUT_AMOUNT');
 
         uint totalFee = adjustableFee.add(fixedFee);
-        require(totalFee <= FEE_DENOMINATOR, "RareBayV2: TOTAL_FEE_TOO_HIGH");
+        require(totalFee <= FEE_DENOMINATOR, 'RareBayV2: TOTAL_FEE_TOO_HIGH');
         uint balance0Adjusted = balance0 * FEE_DENOMINATOR - amount0In * totalFee;
         uint balance1Adjusted = balance1 * FEE_DENOMINATOR - amount1In * totalFee;
         require(
             balance0Adjusted * balance1Adjusted >= uint(_reserve0) * _reserve1 * (FEE_DENOMINATOR ** 2),
-            "RareBayV2: K"
+            'RareBayV2: K'
         );
 
         _distributeFees(amount0In, amount1In);
 
-       if (address(priceOracle) != address(0) && balance0 > 0) {
-        bool isBuy = amount0Out > 0;
-        uint256 newPrice = (balance1 * priceOracle.PRECISION()) / balance0;
-        uint256 inputAmount = isBuy ? amount1In : amount0In; 
-        uint256 receivedAmount = isBuy ? amount0Out : amount1Out;
-        priceOracle.updatePrice(token0, token1, newPrice, isBuy, inputAmount, receivedAmount);
-    }
+        if (address(priceOracle) != address(0) && balance0 > 0) {
+            bool isBuy = amount0Out > 0;
+            uint256 newPrice = (balance1 * priceOracle.PRECISION()) / balance0;
+            uint256 inputAmount = isBuy ? amount1In : amount0In;
+            uint256 receivedAmount = isBuy ? amount0Out : amount1Out;
+            priceOracle.updatePrice(token0, token1, newPrice, isBuy, inputAmount, receivedAmount);
+        }
 
         _update(balance0, balance1, _reserve0, _reserve1);
         emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
     }
-     /**
+
+    /**
      * @notice Calculates the output amount for a given input amount and token.
      * @param amountIn The input amount of the token.
      * @param tokenIn The address of the input token (either token0 or token1).
      * @return amountOut The output amount of the other token after fees.
      */
     function getAmountOut(uint amountIn, address tokenIn) public view returns (uint amountOut) {
-        require(tokenIn == token0 || tokenIn == token1, "RareBayV2: INVALID_TOKEN");
+        require(tokenIn == token0 || tokenIn == token1, 'RareBayV2: INVALID_TOKEN');
         (uint112 reserveIn, uint112 reserveOut) = tokenIn == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
-        require(reserveIn > 0 && reserveOut > 0, "RareBayV2: INSUFFICIENT_LIQUIDITY");
+        require(reserveIn > 0 && reserveOut > 0, 'RareBayV2: INSUFFICIENT_LIQUIDITY');
         uint totalFee = adjustableFee + (fixedFee);
-        require(totalFee < FEE_DENOMINATOR, "RareBayV2: FEE_TOO_HIGH");
-        uint amountInWithFee = amountIn*(FEE_DENOMINATOR-(totalFee));
-        uint numerator = amountInWithFee*(reserveOut);
-        uint denominator = reserveIn * (FEE_DENOMINATOR)+(amountInWithFee);
-        amountOut = numerator/(denominator);
+        require(totalFee < FEE_DENOMINATOR, 'RareBayV2: FEE_TOO_HIGH');
+        uint amountInWithFee = amountIn * (FEE_DENOMINATOR - (totalFee));
+        uint numerator = amountInWithFee * (reserveOut);
+        uint denominator = reserveIn * (FEE_DENOMINATOR) + (amountInWithFee);
+        amountOut = numerator / (denominator);
     }
 
- /**
+    /**
      * @notice Given a desired output amount of one token, returns the required input amount of the other token.
      * @param amountOut The desired output token amount
      * @param tokenOut The address of the output token (must be token0 or token1)
      */
     function getAmountIn(uint amountOut, address tokenOut) external view returns (uint amountIn) {
-        require(amountOut > 0, "RareBayV2: INSUFFICIENT_OUTPUT");
-        (uint112 _reserve0, uint112 _reserve1,) = getReserves();
+        require(amountOut > 0, 'RareBayV2: INSUFFICIENT_OUTPUT');
+        (uint112 _reserve0, uint112 _reserve1, ) = getReserves();
         (uint reserveIn, uint reserveOut) = tokenOut == token1
             ? (uint(_reserve0), uint(_reserve1))
             : (uint(_reserve1), uint(_reserve0));
         uint totalFee = adjustableFee + fixedFee;
-        require(totalFee < FEE_DENOMINATOR, "RareBayV2: FEE_TOO_HIGH");
+        require(totalFee < FEE_DENOMINATOR, 'RareBayV2: FEE_TOO_HIGH');
         uint numerator = reserveIn * amountOut * FEE_DENOMINATOR;
         uint denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - totalFee);
         amountIn = (numerator / denominator) + 1;
@@ -536,7 +563,7 @@ function swapTokens(
         _update(IERC20(token0).balanceOf(address(this)), IERC20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
 
-      /**
+    /**
      * @notice Calculates the total liquidity provided by a specific user.
      * @param user The address of the user whose liquidity is being checked.
      * @return The amount of liquidity tokens held by the user.

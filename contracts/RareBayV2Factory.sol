@@ -20,18 +20,33 @@ contract RareBayV2Factory is IRareBayV2Factory {
         uint pendingDividends0;
         uint pendingDividends1;
     }
+
     event OracleSet(address indexed pair, address indexed oracle);
-    event AdjustableFeeSet(address indexed pair, uint fee); // New event
+    event AdjustableFeeSet(address indexed pair, uint fee);
 
     constructor(address _feeToSetter) {
         feeToSetter = _feeToSetter;
     }
 
-    // Add new fee setter function
     function setAdjustableFee(address pair, uint _fee) external {
         require(msg.sender == feeToSetter, 'RareBayV2: FORBIDDEN');
         IRareBayV2Pair(pair).setAdjustableFee(_fee);
         emit AdjustableFeeSet(pair, _fee);
+    }
+
+    function setPriceOracle(address pair, address oracle) external {
+        require(msg.sender == feeToSetter, 'RareBayV2: FORBIDDEN');
+        require(pair != address(0) && oracle != address(0), 'RareBayV2: INVALID_ADDRESS');
+        require(allPairs.length > 0, 'RareBayV2: NO_PAIRS');
+        bool isValidPair = false;
+        for (uint i = 0; i < allPairs.length; i++) {
+            if (allPairs[i] == pair) {
+                isValidPair = true;
+                break;
+            }
+        }
+        require(isValidPair, 'RareBayV2: INVALID_PAIR');
+        _setPairOracle(pair, oracle);
     }
 
     function allPairsLength() external view returns (uint) {
@@ -64,7 +79,6 @@ contract RareBayV2Factory is IRareBayV2Factory {
         
         PriceOracle oracle = new PriceOracle(pair);
         _setPairOracle(pair, address(oracle));
-        IRareBayV2Pair(pair).setPriceOracle(address(oracle));
 
         getPair[token0][token1] = pair;
         getPair[token1][token0] = pair;
