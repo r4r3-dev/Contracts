@@ -1,49 +1,52 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 /**
  * @title Price Oracle
- * @dev Enhanced TWAP implementation with price history and transaction tracking including amounts.
- *      Now supports calculating prices both ways by respecting the input order of tokenA and tokenB.
+ * @dev Update-based TWAP implementation with price history and transaction tracking including amounts.
+ *      Supports calculating prices both ways by respecting the input order of tokenA and tokenB.
  */
 contract PriceOracle {
     struct PriceData {
-        uint256 cumulativePrice;
-        uint256 lastPrice;
-        uint256 timestamp;
-        uint256[] priceHistory; // Stores historical prices for charting
-        uint256[] historyTimestamps; // Stores timestamps for price history
+        uint256 cumulativePrice;       // Cumulative price for TWAP calculation
+        uint256 lastPrice;             // Most recent price
+        uint256 updateCount;           // Total number of price updates
+        uint256 lastUpdateCount;       // Update count at last price recording
+        uint256[] priceHistory;        // Historical prices for charting
+        uint256[] historyUpdateCounts; // Corresponding update counts for history
     }
 
     struct TransactionData {
-        uint256 buyCount; // Number of buys (token1 -> token2)
-        uint256 sellCount; // Number of sells (token2 -> token1)
-        uint256 lastUpdated;
-        uint256[] inputAmounts;    // Stores the input amounts for each transaction
-        uint256[] receivedAmounts; // Stores the received amounts for each transaction
-        uint256[] txTimestamps;    // Stores the transaction timestamps
+        uint256 buyCount;           // Number of buys (token1 -> token2)
+        uint256 sellCount;          // Number of sells (token2 -> token1)
+        uint256 lastUpdateCount;    // Last update count when transaction happened
+        uint256[] inputAmounts;     // Input amounts for each transaction
+        uint256[] receivedAmounts;  // Received amounts for each transaction
+        uint256[] txUpdateCounts;   // Update counts for each transaction
     }
 
-    uint256 public constant WINDOW_SIZE = 24 hours;
-    uint256 public constant PRECISION = 1e18;
-    uint256 public constant MAX_STALE = 1 hours;
-    uint256 public constant HISTORY_INTERVAL = 5 minutes; // Interval for storing price history
+    uint256 public constant WINDOW_UPDATES = 100;           // Number of updates for TWAP window
+    uint256 public constant PRECISION = 1e18;              // Precision for price calculations
+    uint256 public constant MAX_STALE_UPDATES = 50;        // Max update staleness
+    uint256 public constant HISTORY_INTERVAL_UPDATES = 5;  // Interval (in updates) for price history
 
-    address public immutable amm;
+    address public immutable amm; // AMM contract address
+
     mapping(address => mapping(address => PriceData)) public priceRecords;
     mapping(address => mapping(address => TransactionData)) public transactionRecords;
 
-    event PriceUpdated(address indexed token1, address indexed token2, uint256 price, uint256 timestamp);
+    event PriceUpdated(address indexed token1, address indexed token2, uint256 price, uint256 updateCount);
     event TransactionRecorded(
         address indexed token1,
         address indexed token2,
         bool isBuy,
         uint256 inputAmount,
         uint256 receivedAmount,
-        uint256 timestamp
+        uint256 updateCount
     );
 
     constructor(address _amm) {
+        require(_amm != address(0), "Invalid AMM address");
         amm = _amm;
     }
 
@@ -52,15 +55,6 @@ contract PriceOracle {
         _;
     }
 
-    /**
-     * @notice Updates price and records transaction type along with amounts.
-     * @param tokenA First token address.
-     * @param tokenB Second token address.
-     * @param newPrice Latest price to update.
-     * @param isBuy True if transaction is a buy (token1 -> token2) when tokenA is the lower token.
-     * @param inputAmount Amount sent in the transaction.
-     * @param receivedAmount Amount received from the transaction.
-     */
     function updatePrice(
         address tokenA,
         address tokenB,
@@ -69,141 +63,143 @@ contract PriceOracle {
         uint256 inputAmount,
         uint256 receivedAmount
     ) external onlyAMM {
+        require(newPrice > 0, "Invalid price");
         (address token1, address token2) = normalizePair(tokenA, tokenB);
-        
+
         bool isDirect = (tokenA == token1);
-        uint256 effectivePrice = isDirect ? newPrice : ((PRECISION * PRECISION) / newPrice);
+        uint256 effectivePrice = isDirect ? newPrice : mulDiv(PRECISION, PRECISION, newPrice);
         bool effectiveIsBuy = isDirect ? isBuy : !isBuy;
-        
         if (!isDirect) {
             (inputAmount, receivedAmount) = (receivedAmount, inputAmount);
         }
 
         PriceData storage record = priceRecords[token1][token2];
-        TransactionData storage txnRecord = transactionRecords[token1][token2];
+        TransactionData storage txn = transactionRecords[token1][token2];
 
-        if (record.timestamp > 0) {
-            uint256 elapsed = block.timestamp - record.timestamp;
-            uint256 effectiveElapsed = elapsed > WINDOW_SIZE ? WINDOW_SIZE : elapsed;
+        // Increment update count
+        uint256 currentCount = record.updateCount + 1;
+        uint256 elapsed = currentCount - record.lastUpdateCount;
+        uint256 effectiveElapsed = elapsed > WINDOW_UPDATES ? WINDOW_UPDATES : elapsed;
 
-            record.cumulativePrice = record.lastPrice * effectiveElapsed;
+        // TWAP cumulative logic
+        if (record.lastUpdateCount > 0) {
+            uint256 priceContribution = mulDiv(record.lastPrice, effectiveElapsed * PRECISION, WINDOW_UPDATES);
+            record.cumulativePrice += priceContribution;
 
-            if (elapsed > WINDOW_SIZE) {
-                record.cumulativePrice = effectivePrice * WINDOW_SIZE;
+            if (elapsed > WINDOW_UPDATES) {
+                record.cumulativePrice = mulDiv(effectivePrice, WINDOW_UPDATES * PRECISION, WINDOW_UPDATES);
             } else {
-                record.cumulativePrice += effectivePrice * effectiveElapsed;
-                record.cumulativePrice -= (record.cumulativePrice * effectiveElapsed) / WINDOW_SIZE;
+                uint256 newContribution = mulDiv(effectivePrice, effectiveElapsed * PRECISION, WINDOW_UPDATES);
+                record.cumulativePrice = mulDiv(record.cumulativePrice, (WINDOW_UPDATES - effectiveElapsed), WINDOW_UPDATES) + newContribution;
             }
 
-            if (elapsed >= HISTORY_INTERVAL) {
+            // History on interval
+            if (elapsed >= HISTORY_INTERVAL_UPDATES) {
                 record.priceHistory.push(effectivePrice);
-                record.historyTimestamps.push(block.timestamp);
+                record.historyUpdateCounts.push(currentCount);
             }
-        }
-
-        if (effectiveIsBuy) {
-            txnRecord.buyCount++;
         } else {
-            txnRecord.sellCount++;
+            // First update initialization
+            record.cumulativePrice = mulDiv(effectivePrice, WINDOW_UPDATES * PRECISION, WINDOW_UPDATES);
         }
-        txnRecord.lastUpdated = block.timestamp;
-        txnRecord.inputAmounts.push(inputAmount);
-        txnRecord.receivedAmounts.push(receivedAmount);
-        txnRecord.txTimestamps.push(block.timestamp);
 
+        // Update record state
         record.lastPrice = effectivePrice;
-        record.timestamp = block.timestamp;
+        record.lastUpdateCount = currentCount;
+        record.updateCount = currentCount;
 
-        emit PriceUpdated(token1, token2, effectivePrice, block.timestamp);
-        emit TransactionRecorded(token1, token2, effectiveIsBuy, inputAmount, receivedAmount, block.timestamp);
+        // Transaction tracking
+        if (effectiveIsBuy) txn.buyCount++; else txn.sellCount++;
+        txn.lastUpdateCount = currentCount;
+        txn.inputAmounts.push(inputAmount);
+        txn.receivedAmounts.push(receivedAmount);
+        txn.txUpdateCounts.push(currentCount);
+
+        emit PriceUpdated(token1, token2, effectivePrice, currentCount);
+        emit TransactionRecorded(token1, token2, effectiveIsBuy, inputAmount, receivedAmount, currentCount);
     }
 
-    /**
-     * @notice Fetches the TWAP for a specific pair, returning tokenB per tokenA based on input order.
-     * @param tokenA First token in the pair.
-     * @param tokenB Second token in the pair.
-     * @return TWAP of tokenB per tokenA, scaled by PRECISION.
-     */
     function getTWAP(address tokenA, address tokenB) external view returns (uint256) {
         (address token1, address token2) = normalizePair(tokenA, tokenB);
         PriceData storage record = priceRecords[token1][token2];
 
-        require(block.timestamp - record.timestamp <= MAX_STALE, "Data stale");
-        uint256 elapsed = block.timestamp - record.timestamp;
-        require(elapsed > 0, "Insufficient data");
+        uint256 stale = record.updateCount - record.lastUpdateCount;
+        require(stale <= MAX_STALE_UPDATES, "Data stale");
+        require(stale > 0, "Insufficient data");
 
-        uint256 twap = (record.cumulativePrice * PRECISION) / elapsed;
+        uint256 twap = mulDiv(record.cumulativePrice, PRECISION, stale);
         if (tokenA == token1) {
-            return twap; // token2 per token1, i.e., tokenB per tokenA
+            return twap;
         } else {
-            return (PRECISION * PRECISION) / twap; // token1 per token2, i.e., tokenB per tokenA
+            return mulDiv(PRECISION, PRECISION, twap);
         }
     }
 
-    /**
-     * @notice Fetches price history for charting, returning prices as tokenB per tokenA.
-     * @param tokenA First token in the pair.
-     * @param tokenB Second token in the pair.
-     * @param range Time range for history (e.g., 24 hours).
-     * @return prices Array of prices (tokenB per tokenA), timestamps Array of corresponding timestamps.
-     */
-    function getPriceHistory(address tokenA, address tokenB, uint256 range) external view returns (uint256[] memory, uint256[] memory) {
+    function getPriceHistory(
+        address tokenA,
+        address tokenB,
+        uint256 rangeUpdates
+    ) external view returns (uint256[] memory prices, uint256[] memory updateCounts) {
         (address token1, address token2) = normalizePair(tokenA, tokenB);
         bool isDirect = (tokenA == token1);
         PriceData storage record = priceRecords[token1][token2];
 
-        uint256 endTime = block.timestamp;
-        uint256 startTime = endTime - range;
+        uint256 startCount = record.updateCount >= rangeUpdates
+            ? record.updateCount - rangeUpdates
+            : 0;
 
+        uint256 total = record.priceHistory.length;
         uint256 count = 0;
-        for (uint256 i = 0; i < record.priceHistory.length; i++) {
-            if (record.historyTimestamps[i] >= startTime && record.historyTimestamps[i] <= endTime) {
-                count++;
-            }
+        for (uint256 i = 0; i < total; i++) {
+            if (record.historyUpdateCounts[i] >= startCount) count++;
         }
 
-        uint256[] memory prices = new uint256[](count);
-        uint256[] memory timestamps = new uint256[](count);
-        uint256 index = 0;
-
-        for (uint256 i = 0; i < record.priceHistory.length; i++) {
-            if (record.historyTimestamps[i] >= startTime && record.historyTimestamps[i] <= endTime) {
+        prices = new uint256[](count);
+        updateCounts = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < total; i++) {
+            uint256 ucount = record.historyUpdateCounts[i];
+            if (ucount >= startCount) {
                 uint256 price = record.priceHistory[i];
-                if (!isDirect) {
-                    price = (PRECISION * PRECISION) / price;
-                }
-                prices[index] = price;
-                timestamps[index] = record.historyTimestamps[i];
-                index++;
+                prices[idx] = isDirect ? price : mulDiv(PRECISION, PRECISION, price);
+                updateCounts[idx] = ucount;
+                idx++;
             }
         }
-
-        return (prices, timestamps);
     }
 
-    /**
-     * @notice Fetches transaction data, adjusting buy/sell counts based on input order.
-     * @param tokenA First token in the pair.
-     * @param tokenB Second token in the pair.
-     * @return buyCount Number of buys (tokenA -> tokenB), sellCount Number of sells (tokenB -> tokenA), lastUpdated Last update timestamp.
-     */
-    function getTransactionData(address tokenA, address tokenB) external view returns (
+    function getTransactionData(
+        address tokenA,
+        address tokenB
+    ) external view returns (
         uint256 buyCount,
         uint256 sellCount,
-        uint256 lastUpdated
+        uint256 lastCount
     ) {
         (address token1, address token2) = normalizePair(tokenA, tokenB);
-        TransactionData storage txnRecord = transactionRecords[token1][token2];
-
+        TransactionData storage txn = transactionRecords[token1][token2];
         if (tokenA == token1) {
-            return (txnRecord.buyCount, txnRecord.sellCount, txnRecord.lastUpdated);
+            buyCount = txn.buyCount;
+            sellCount = txn.sellCount;
         } else {
-            return (txnRecord.sellCount, txnRecord.buyCount, txnRecord.lastUpdated);
+            buyCount = txn.sellCount;
+            sellCount = txn.buyCount;
         }
+        lastCount = txn.lastUpdateCount;
     }
 
-    // Normalize token pair order.
     function normalizePair(address tokenA, address tokenB) internal pure returns (address, address) {
         return tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    }
+
+    function mulDiv(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) internal pure returns (uint256 result) {
+        require(denominator > 0, "Divide by zero");
+        unchecked {
+            result = (x * y) / denominator;
+        }
     }
 }
