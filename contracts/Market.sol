@@ -1,1089 +1,755 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.28;
 
 import '@openzeppelin/contracts/token/ERC721/IERC721.sol';
 import '@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol';
 import '@openzeppelin/contracts/token/ERC1155/IERC1155.sol';
 import '@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol';
 import '@openzeppelin/contracts/access/AccessControl.sol';
-import './libraries/ReentrancyGuard.sol';
-import './interfaces/IRoyaltyAMM.sol';
+import '@openzeppelin/contracts/utils/Pausable.sol';
+import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import '@openzeppelin/contracts/utils/Address.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import {Royalty} from './Royalties.sol';
-import "./libraries/ERC165Utils.sol";
-import "./interfaces/IERC2981.sol";
+import '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
+interface IERC721Extended is IERC721 {
+    function totalSupply() external view returns (uint256);
+}
+
+interface IRoyaltyEngine {
+    function getRoyalty(
+        address tokenAddress,
+        uint256 tokenId,
+        uint256 value
+    ) external view returns (address payable[] memory recipients, uint256[] memory amounts);
+
+    function isTrusted() external view returns (bool);
+}
 
 /**
- * 
-██████╗  █████╗ ██████╗ ███████╗██████╗  █████╗ ██╗   ██╗
-██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔══██╗╚██╗ ██╔╝
-██████╔╝███████║██████╔╝█████╗  ██████╔╝███████║ ╚████╔╝ 
-██╔══██╗██╔══██║██╔══██╗██╔══╝  ██╔══██╗██╔══██║  ╚██╔╝  
-██║  ██║██║  ██║██║  ██║███████╗██████╔╝██║  ██║   ██║   
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   
- * @title RareMarket NFT Marketplace
- * @notice A contract for listing, buying, auctioning, and making offers on ERC721 and ERC1155 NFTs.
- * It handles platform fees and royalty distributions using the integrated RoyaltyEngine library.
- * @dev This contract requires NFTs to be transferred to it for listings and auctions.
- * It supports both native currency and ERC20 tokens for payments.
- * Access control is used for administrative functions.
+ * @title RoyaltyAMM
+ * @notice An AMM for ERC721 NFTs, paired with ERC20 tokens or native currency, with royalty management.
+ * @dev Handles liquidity pools, NFT trading, and royalty reinvestment into pools.
+ * Integrates with RareMarket by adding royalties as liquidity. Supports multiple royalty recipients.
  */
-
-contract RareMarket is AccessControl, ReentrancyGuard, IERC721Receiver, IERC1155Receiver {
-    using Address for address payable;
+contract Royalty is ReentrancyGuard, AccessControl, IERC721Receiver, IERC1155Receiver, Pausable {
     using SafeERC20 for IERC20;
-    address public royaltyEngineAddress;
+    using Address for address payable;
 
-    /// @notice Role for administrative actions like updating fees.
-    bytes32 public constant ADMIN_ROLE = keccak256('ADMIN_ROLE');
+    // --- Structs ---
 
-    /// @notice The percentage of sales taken as a platform fee, in basis points (1% = 100 bps).
-    uint256 public platformFeeBps;
-    /// @notice The recipient of platform fees.
-    address payable public platformFeeRecipient;
-    /// @notice Standard address for native currency transactions (e.g., CORE), typically address(0).
-    address public immutable NATIVE_CURRENCY;
-
-    /// @dev Enum for token types.
-    enum TokenType {
-        ERC721,
-        ERC1155
-    }
-    /// @dev Enum for listing/auction/offer statuses.
-    enum Status {
-        Inactive,
-        Active,
-        Sold,
-        Cancelled,
-        Finalized
-    } // Sold might be redundant if Inactive is used after completion
-
-    /// @notice Represents a direct sale listing.
-    struct Listing {
-        uint256 listingId; // Unique identifier for the listing
-        address listingCreator; // Address that created the listing
-        address assetContract; // Address of the NFT contract
-        uint256 tokenId; // ID of the token being listed
-        uint256 quantity; // Quantity of tokens (1 for ERC721)
-        address currency; // Payment currency (address(0) for native)
-        uint256 pricePerToken; // Price for each token unit
-        uint256 startTimestamp; // Timestamp when the listing becomes active
-        uint256 endTimestamp; // Timestamp when the listing expires
-        TokenType tokenType; // Type of token (ERC721 or ERC1155)
-        Status status; // Current status of the listing
+    struct RoyaltyInfo {
+        address payable[] recipients;
+        uint24[] basisPoints;
     }
 
-    /// @notice Represents an auction for NFTs.
-    struct Auction {
-        uint256 auctionId; // Unique identifier for the auction
-        address creator; // Address that created the auction
-        address assetContract; // Address of the NFT contract
-        uint256 tokenId; // ID of the token being auctioned
-        uint256 quantity; // Quantity of tokens (1 for ERC721)
-        address currency; // Payment currency (address(0) for native)
-        uint256 startTimestamp; // Timestamp when bidding can start
-        uint256 endTimestamp; // Timestamp when the auction ends
-        address highestBidder; // Current highest bidder
-        uint256 highestBid; // Current highest bid amount
-        TokenType tokenType; // Type of token (ERC721 or ERC1155)
-        Status status; // Current status of the auction
-    }
-
-        struct SweptItemDetails {
-        uint256 id;
-        address creator;
-        address asset;
-        uint256 token;
-        uint256 qty;
+    struct LiquidityPool {
         address currency;
-        uint256 price;
-        TokenType tokenType;
+        uint256 tokenReserve;
+        uint256 nftReserve;
+        uint256 totalLiquidityShares;
+        uint256 accumulatedFees;
+        mapping(address => uint256) providerTokenShares;
+        mapping(uint256 => bool) isNFTInPool;
+        uint256[] poolNFTTokenIdsList;
+        mapping(uint256 => uint256) nftTokenIdToListIndex;
     }
 
-    /// @notice Represents an offer made by a buyer for an NFT.
-    struct Offer {
-        uint256 offerId; // Unique identifier for the offer
-        address offeror; // Address that made the offer
-        address assetContract; // Address of the NFT contract for which the offer is made
-        uint256 tokenId; // ID of the token being offered for
-        uint256 quantity; // Quantity of tokens (1 for ERC721)
-        address currency; // Payment currency (address(0) for native)
-        uint256 pricePerToken; // Price offered per token unit
-        uint256 expiryTimestamp; // Timestamp when the offer expires
-        TokenType tokenType; // Type of token (ERC721 or ERC1155)
-        Status status; // Current status of the offer
+    struct CollectionFees {
+        uint256 totalTradingVolume;
+        uint256 totalFeesCollected;
     }
-    /// @notice Input structure for items to be purchased in a sweepCollection call.
-    struct SweepItemInput {
-        uint256 listingId;      // ID of the listing to buy from
-        uint256 quantityToBuy;  // Quantity of tokens to buy from this listing
+
+    struct PoolIdentifier {
+        address collection;
+        address currency;
     }
-    // --- Storage ---
-    mapping(uint256 => Listing) public listings;
-    mapping(uint256 => Auction) public auctions;
-    mapping(uint256 => Offer) public offers;
 
-    /// @dev Tracks pending withdrawals for native currency, keyed by user address.
-    mapping(address => uint256) public pendingNativeWithdrawals;
-    /// @dev Tracks pending withdrawals for ERC20 tokens, keyed by user address then token address.
-    mapping(address => mapping(address => uint256)) public pendingErc20Withdrawals;
-    // Note: pendingRoyalties was removed as royalties are now also handled by pendingNative/Erc20Withdrawals.
+    struct PoolDetail {
+        address collectionAddress;
+        address currencyAddress;
+        uint256 tokenReserve;
+        uint256 nftReserveCount;
+        uint256 totalLiquidityShares;
+        uint256 accumulatedFees;
+        uint256[] nftTokenIdsInPool;
+        uint256 priceToBuyNFT;
+        uint256 priceToSellNFT;
+    }
 
-    /// @notice Counter for total listings created.
-    uint256 public totalListings;
-    /// @notice Counter for total auctions created.
-    uint256 public totalAuctions;
-    /// @notice Counter for total offers made.
-    uint256 public totalOffers;
+    // --- Constants ---
 
-    /// @notice Tracks total sales volume for each collection, per currency.
-    /// @dev mapping: assetContract => currency => totalVolume
-    mapping(address => mapping(address => uint256)) public totalVolumeSoldByCollectionAndCurrency;
+    uint256 public constant SWAP_FEE_BPS = 300; // Immutable to prevent runtime changes
+    address public immutable NATIVE_CURRENCY;
+    uint256 public constant MAX_BATCH_SIZE = 100;
+
+    // --- State ---
+
+    bytes32 public constant ADMIN_ROLE = keccak256('ADMIN_ROLE');
+    address public royaltyEngineAddress;
+    address public rareMarket;
+
+    mapping(address => mapping(address => LiquidityPool)) public collectionPools;
+    mapping(address => CollectionFees) public collectionStats;
+    mapping(address => mapping(uint256 => RoyaltyInfo)) private _royalties;
+    PoolIdentifier[] public allPoolIdentifiers;
+    mapping(address => mapping(address => uint256)) private poolIdentifierIndex;
 
     // --- Events ---
-    event NewListing(
-        uint256 indexed listingId,
-        address indexed listingCreator,
-        address indexed assetContract,
-        uint256 tokenId,
-        uint256 quantity,
-        address currency,
-        uint256 pricePerToken
-    );
-     /// @notice Emitted when a collection is swept (multiple NFTs purchased in one transaction).
-    event CollectionSwept(
-        address indexed buyer,
-        address indexed assetContract, // This will be the contract of the *first* NFT in the sweep, or common across all if enforced
-        address currency,
-        uint256 totalCost,
-        uint256 numberOfNFTsSwept // Total quantity of NFTs transferred
-    );
-    event ListingCancelled(uint256 indexed listingId, address indexed canceller);
-    event ListingSold(
-        uint256 indexed listingId,
-        address indexed seller,
-        address indexed buyer,
-        uint256 quantitySold,
-        uint256 totalPricePaid
-    );
-    event AuctionCreated(
-        uint256 indexed auctionId,
-        address indexed creator,
-        address indexed assetContract,
-        uint256 tokenId,
-        uint256 quantity,
-        address currency,
-        uint256 endTimestamp
-    );
-    event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 amount);
-    event AuctionCancelled(uint256 indexed auctionId, address indexed canceller); // Assuming admin might cancel, or creator if no bids
-    event AuctionFinalized(
-        uint256 indexed auctionId,
-        address indexed winner,
-        address indexed creator,
-        uint256 winningBid
-    );
-    event NewOffer(uint256 indexed offerId, address indexed offeror, address indexed assetContract, uint256 tokenId, uint256 quantity,address currency, uint256 pricePerToken );
-    event OfferAccepted(uint256 indexed offerId, address indexed acceptor, address indexed offeror);
-    event OfferCancelled(uint256 indexed offerId, address indexed offeror);
-    event PlatformFeeUpdated(uint256 newPlatformFeeBps);
-    event PlatformFeeRecipientUpdated(address indexed newPlatformFeeRecipient);
-    event FundsWithdrawn(address indexed user, address indexed currency, uint256 amount);
 
-    /**
-     * @notice Constructor to initialize the marketplace.
-     * @param _platformFeeRecipient The initial address to receive platform fees.
-     * @param _platformFeeBps The initial platform fee in basis points (e.g., 250 for 2.5%).
-     */
-    constructor(address payable _platformFeeRecipient, uint256 _platformFeeBps, address _royaltyEngineAddr) {
-        require(_platformFeeRecipient != address(0), 'RareMarket: Zero address for fee recipient');
-        require(_platformFeeBps <= 1000, 'RareMarket: Fee exceeds 10%'); // Max 10% platform fee
+    event PoolCreated(
+        address indexed collection,
+        address indexed currency,
+        address indexed creator,
+        uint256 initialTokenAmount,
+        uint256[] tokenIds
+    );
+    event RoyaltyFundsAddedAsLiquidity(
+        address indexed collection,
+        address indexed currency,
+        uint256 amountAdded,
+        address indexed sourceMarketplace
+    );
+    event BatchSwapNFTToToken(
+        address indexed collection,
+        address indexed user,
+        uint256[] tokenIds,
+        address currency,
+        uint256 totalAmountOutNet,
+        uint256 totalFee
+    );
+    event LiquidityAdded(
+        address indexed collection,
+        address indexed provider,
+        address currency,
+        uint256 tokenAmount,
+        uint256 sharesIssued
+    );
+    event NFTLiquidityAdded(address indexed collection, address indexed provider, address currency, uint256[] tokenIds);
+    event LiquidityRemoved(
+        address indexed collection,
+        address indexed provider,
+        address currency,
+        uint256 tokenAmountRemoved,
+        uint256 sharesBurned,
+        uint256 feeShareReturned
+    );
+    event SwapNFTToToken(
+        address indexed collection,
+        address indexed user,
+        uint256 tokenId,
+        address currency,
+        uint256 amountOut,
+        uint256 fee
+    );
+    event SwapTokenToNFT(
+        address indexed collection,
+        address indexed user,
+        uint256 tokenId,
+        address currency,
+        uint256 amountIn,
+        uint256 fee
+    );
+    event FeesWithdrawn(address indexed collection, address indexed provider, address currency, uint256 amount);
+    event SwapFeeSet(uint256 newFeeBps); // Retained for compatibility, though fee is now constant
+    event RoyaltySet(address indexed collection, uint256 indexed tokenId, address recipient, uint256 totalBasisPoints);
+    event NoRoyaltiesApplied(address indexed collection, uint256 tokenId, address currency);
+    event RoyaltyDistributed(
+        address indexed collection,
+        uint256 indexed tokenId,
+        address indexed recipient,
+        uint256 amount
+    );
+    event RoyaltyEngineUpdated(address indexed newRoyaltyEngine);
+    event RareMarketUpdated(address indexed newRareMarket);
 
+    // --- Constructor ---
+
+    constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
-        royaltyEngineAddress = _royaltyEngineAddr;
-        platformFeeRecipient = _platformFeeRecipient;
-        platformFeeBps = _platformFeeBps;
-        NATIVE_CURRENCY = address(0); // Initialize native currency marker
+        royaltyEngineAddress = address(0); // Default to zero until set
+        NATIVE_CURRENCY = address(0);
+        rareMarket = address(0); // Initialize to zero, set via admin function
     }
 
     // --- Admin Functions ---
-/**
- 
-    /**
-     * @notice Updates the platform fee percentage.
-     * @dev Only callable by an address with ADMIN_ROLE.
-     * @param _newFeeBps The new platform fee in basis points (e.g., 300 for 3%). Max 1000 (10%).
-     */
-    function updatePlatformFeeBps(uint256 _newFeeBps) external onlyRole(ADMIN_ROLE) {
-        require(_newFeeBps <= 1000, 'RareMarket: Fee exceeds 10%'); // Max 10% platform fee
-        platformFeeBps = _newFeeBps;
-        emit PlatformFeeUpdated(_newFeeBps);
+
+    function adminSetRoyalty(
+        address tokenAddress,
+        uint256 tokenId,
+        address payable[] memory recipients,
+        uint24[] memory basisPoints
+    ) external onlyRole(ADMIN_ROLE) {
+        require(tokenAddress != address(0), "RoyaltyAMM: Zero token address");
+        require(recipients.length == basisPoints.length, "RoyaltyAMM: Mismatched arrays");
+        _setRoyalty(tokenAddress, tokenId, recipients, basisPoints);
     }
 
-    /**
-     * @notice Updates the recipient address for platform fees.
-     * @dev Only callable by an address with ADMIN_ROLE.
-     * @param _newRecipient The new address to receive platform fees.
-     */
-    function updatePlatformFeeRecipient(address payable _newRecipient) external onlyRole(ADMIN_ROLE) {
-        require(_newRecipient != address(0), 'RareMarket: Zero address for new recipient');
-        platformFeeRecipient = _newRecipient;
-        emit PlatformFeeRecipientUpdated(_newRecipient);
+    function setRoyaltyEngineAddress(address _newRoyaltyEngine) external onlyRole(ADMIN_ROLE) {
+        require(_newRoyaltyEngine != address(0), "RoyaltyAMM: Zero address for royalty engine");
+        royaltyEngineAddress = _newRoyaltyEngine;
+        emit RoyaltyEngineUpdated(_newRoyaltyEngine);
     }
 
-    /* @notice Allows a user to buy multiple NFTs from different active listings in a single transaction.
-     * @dev All items in the sweep must use the same `_currency`.
-     * @param _itemsToSweep An array of `SweepItemInput` structs, each specifying a listingId and quantityToBuy.
-     * @param _currency The currency used for payment for all items in the sweep.
-     * @param _buyFor The address to receive the purchased NFTs. If address(0), defaults to msg.sender.
-     */
-    function sweepCollection(
-        SweepItemInput[] calldata _itemsToSweep,
-        address _currency,
-        address _buyFor
-    ) external payable nonReentrant {
-        require(_itemsToSweep.length > 0, "RareMarket: No items to sweep");
-        
-        address buyerActual = (_buyFor == address(0)) ? msg.sender : _buyFor;
-        require(buyerActual != address(0), "RareMarket: Buyer cannot be zero address");
+    function setRareMarket(address _newRareMarket) external onlyRole(ADMIN_ROLE) {
+        require(_newRareMarket != address(0), "RoyaltyAMM: Zero address for rare market");
+        rareMarket = _newRareMarket;
+        emit RareMarketUpdated(_newRareMarket);
+    }
 
-        uint256 totalCalculatedPrice = 0;
-        uint256 i; 
+    function pause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+    }
 
-        for (i = 0; i < _itemsToSweep.length; i++) {
-            SweepItemInput calldata item = _itemsToSweep[i];
-            Listing storage listing = listings[item.listingId];
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        _unpause();
+    }
 
-            require(listing.status == Status.Active, "RareMarket: Sweep item listing not active");
-            require(block.timestamp >= listing.startTimestamp, "RareMarket: Sweep item listing not yet started");
-            require(block.timestamp <= listing.endTimestamp, "RareMarket: Sweep item listing expired");
-            require(item.quantityToBuy > 0, "RareMarket: Sweep item quantity must be > 0");
-            require(item.quantityToBuy <= listing.quantity, "RareMarket: Not enough quantity for sweep item");
-            require(listing.currency == _currency, "RareMarket: Sweep item currency mismatch");
-            
-            totalCalculatedPrice += listing.pricePerToken * item.quantityToBuy;
+    // --- Royalty Functions ---
+
+    function setRoyalty(
+        address tokenAddress,
+        uint256 tokenId,
+        address payable[] memory recipients,
+        uint24[] memory basisPoints
+    ) external whenNotPaused {
+        require(tokenAddress != address(0), "RoyaltyAMM: Zero token address");
+        require(IERC721(tokenAddress).ownerOf(tokenId) == msg.sender, "RoyaltyAMM: Not token owner");
+        require(recipients.length == basisPoints.length, "RoyaltyAMM: Mismatched arrays");
+        _setRoyalty(tokenAddress, tokenId, recipients, basisPoints);
+    }
+
+    function _setRoyalty(
+        address tokenAddress,
+        uint256 tokenId,
+        address payable[] memory recipients,
+        uint24[] memory basisPoints
+    ) internal {
+        require(recipients.length > 0, "RoyaltyAMM: No recipients provided");
+        uint256 totalBps = 0;
+        for (uint256 i = 0; i < basisPoints.length; i++) {
+            totalBps += basisPoints[i];
+            require(basisPoints[i] <= 10000, "RoyaltyAMM: Individual royalty too high");
+        }
+        require(totalBps <= 10000, "RoyaltyAMM: Total royalty exceeds 100%");
+        _royalties[tokenAddress][tokenId] = RoyaltyInfo(recipients, basisPoints);
+        emit RoyaltySet(tokenAddress, tokenId, recipients[0], totalBps);
+    }
+
+    function royaltyInfo(
+        address tokenAddress,
+        uint256 tokenId,
+        uint256 salePrice
+    ) external view returns (address receiver, uint256 royaltyAmount) {
+        RoyaltyInfo memory info = _royalties[tokenAddress][tokenId];
+        if (info.recipients.length > 0) {
+            receiver = info.recipients[0];
+            royaltyAmount = info.basisPoints[0] > 0 ? (salePrice * info.basisPoints[0]) / 10000 : 0;
+        }
+    }
+
+    function getRoyalty(
+        address tokenAddress,
+        uint256 tokenId,
+        uint256 value
+    ) public view returns (address payable[] memory recipients, uint256[] memory amounts) {
+        if (royaltyEngineAddress != address(0) && IRoyaltyEngine(royaltyEngineAddress).isTrusted()) {
+            (recipients, amounts) = IRoyaltyEngine(royaltyEngineAddress).getRoyalty(tokenAddress, tokenId, value);
+        } else {
+            RoyaltyInfo memory info = _royalties[tokenAddress][tokenId];
+            recipients = info.recipients.length > 0 ? info.recipients : new address payable[](1);
+            amounts = new uint256[](recipients.length);
+            uint256 totalRoyalty = 0;
+            for (uint256 i = 0; i < recipients.length; i++) {
+                amounts[i] = recipients[i] != address(0) ? (value * info.basisPoints[i]) / 10000 : 0;
+                totalRoyalty += amounts[i];
+            }
+            require(totalRoyalty <= value, "RoyaltyAMM: Royalty exceeds value");
+            if (recipients.length == 0) {
+                recipients = new address payable[](1);
+                amounts = new uint256[](1);
+                recipients[0] = payable(address(0));
+                amounts[0] = 0;
+            }
+        }
+    }
+
+    function _getTotalRoyaltyAmount(address tokenAddress, uint256 tokenId, uint256 value) internal view returns (uint256 totalRoyalty) {
+        if (royaltyEngineAddress != address(0) && IRoyaltyEngine(royaltyEngineAddress).isTrusted()) {
+            (address payable[] memory recipients, uint256[] memory amounts) = IRoyaltyEngine(royaltyEngineAddress).getRoyalty(tokenAddress, tokenId, value);
+            require(recipients.length == amounts.length, "RoyaltyAMM: Invalid royalty data");
+            for (uint256 i = 0; i < amounts.length; i++) {
+                totalRoyalty += amounts[i];
+            }
+        } else {
+            RoyaltyInfo memory info = _royalties[tokenAddress][tokenId];
+            for (uint256 i = 0; i < info.basisPoints.length; i++) {
+                if (info.recipients[i] != address(0)) {
+                    totalRoyalty += (value * info.basisPoints[i]) / 10000;
+                }
+            }
+        }
+        require(totalRoyalty <= value, "RoyaltyAMM: Total royalty exceeds value");
+    }
+
+    function addRoyaltyAsLiquidity(address collection, address currency, uint256 royaltyAmount) 
+        external 
+        payable 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(rareMarket != address(0), "RoyaltyAMM: RareMarket not set");
+        require(msg.sender == rareMarket, "RoyaltyAMM: Only RareMarket can call this function");
+        require(royaltyAmount > 0, "RoyaltyAMM: Royalty amount must be positive");
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+
+        if (currency == NATIVE_CURRENCY) {
+            require(msg.value == royaltyAmount, "RoyaltyAMM: Native currency mismatch");
+        } else {
+            require(msg.value == 0, "RoyaltyAMM: Native currency sent for ERC20");
+            uint256 balanceBefore = IERC20(currency).balanceOf(address(this));
+            IERC20(currency).safeTransferFrom(msg.sender, address(this), royaltyAmount);
+            uint256 balanceAfter = IERC20(currency).balanceOf(address(this));
+            require(balanceAfter >= balanceBefore + royaltyAmount, "RoyaltyAMM: ERC20 royalty not received");
         }
 
-        
-        _processPayment(msg.sender, _currency, totalCalculatedPrice);
+        LiquidityPool storage pool = collectionPools[collection][currency];
+        uint256 totalRoyalty = _getTotalRoyaltyAmount(collection, 0, royaltyAmount);
 
-        uint256 totalNFTsSwept = 0;
-        address firstAssetContract = address(0); // For the CollectionSwept event
+        if (totalRoyalty == 0) {
+            pool.tokenReserve += royaltyAmount;
+            emit NoRoyaltiesApplied(collection, 0, currency);
+        } else {
+            require(royaltyAmount >= totalRoyalty, "RoyaltyAMM: Insufficient royalty amount for distribution");
+            (address payable[] memory recipients, uint256[] memory amounts) = getRoyalty(collection, 0, royaltyAmount);
+            uint256 remainingAmount = royaltyAmount;
+
+            // State changes before external calls
+            for (uint256 i = 0; i < recipients.length; i++) {
+                if (amounts[i] > 0 && recipients[i] != address(0)) {
+                    remainingAmount -= amounts[i];
+                }
+            }
+            if (remainingAmount > 0) {
+                pool.tokenReserve += remainingAmount;
+                emit RoyaltyFundsAddedAsLiquidity(collection, currency, remainingAmount, msg.sender);
+            }
+
+            // External calls after state updates
+            for (uint256 i = 0; i < recipients.length; i++) {
+                if (amounts[i] > 0 && recipients[i] != address(0)) {
+                    if (currency == NATIVE_CURRENCY) {
+                        payable(recipients[i]).sendValue(amounts[i]);
+                    } else {
+                        IERC20(currency).safeTransfer(recipients[i], amounts[i]);
+                    }
+                    emit RoyaltyDistributed(collection, 0, recipients[i], amounts[i]);
+                }
+            }
+        }
+    }
+
+    function createPool(address collection, address currency, uint256[] calldata initialTokenIds, uint256 initialTokenAmount) 
+        external 
+        payable 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(initialTokenIds.length > 0, "RoyaltyAMM: Must deposit at least one NFT");
+        require(initialTokenIds.length <= MAX_BATCH_SIZE, "RoyaltyAMM: Too many tokens in batch");
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        require(poolIdentifierIndex[collection][currency] == 0, "RoyaltyAMM: Pool already exists");
+
+        LiquidityPool storage pool = collectionPools[collection][currency];
+        pool.currency = currency;
 
        
-        for (i = 0; i < _itemsToSweep.length; i++) {
-            SweepItemInput calldata item = _itemsToSweep[i];
-            Listing storage listing = listings[item.listingId]; // Re-access storage pointer
+        allPoolIdentifiers.push(PoolIdentifier(collection, currency));
+        poolIdentifierIndex[collection][currency] = allPoolIdentifiers.length;
+        for (uint256 i = 0; i < initialTokenIds.length; i++) {
+            uint256 tokenId = initialTokenIds[i];
 
-            uint256 itemPrice = listing.pricePerToken * item.quantityToBuy;
+            require(!pool.isNFTInPool[tokenId], "RoyaltyAMM: Initial NFT already marked in pool");
 
-            _distributeSaleProceeds(
-                listing.listingCreator,
-                listing.assetContract,
-                listing.tokenId,
-                itemPrice,
-                listing.currency // This is same as _currency due to earlier check
-            );
-
-            _transferNFTToUser(listing.assetContract, buyerActual, listing.tokenId, item.quantityToBuy, listing.tokenType);
-
-            listing.quantity -= item.quantityToBuy;
-            if (listing.quantity == 0) {
-                listing.status = Status.Sold;
-            }
-
-            totalNFTsSwept += item.quantityToBuy;
-            if (firstAssetContract == address(0)) {
-                firstAssetContract = listing.assetContract;
-            }
-
-            emit ListingSold(item.listingId, listing.listingCreator, buyerActual, item.quantityToBuy, itemPrice);
+            // State changes before external call
+            pool.isNFTInPool[tokenId] = true;
+            pool.poolNFTTokenIdsList.push(tokenId);
+            pool.nftTokenIdToListIndex[tokenId] = pool.poolNFTTokenIdsList.length;
+            pool.nftReserve += 1;
         }
 
-        emit CollectionSwept(buyerActual, firstAssetContract, _currency, totalCalculatedPrice, totalNFTsSwept);
-    }
-    // --- Listings ---
-
-    /**
-     * @notice Creates a new listing for selling NFTs.
-     * @dev The caller must own the NFT(s) and approve this contract or transfer them. NFTs are transferred to this contract.
-     * @param _assetContract Address of the ERC721 or ERC1155 contract.
-     * @param _tokenId ID of the token to list.
-     * @param _quantity Quantity to list (must be 1 for ERC721).
-     * @param _currency Address of the ERC20 currency, or address(0) for native currency.
-     * @param _pricePerToken Price per single token unit in the specified currency.
-     * @param _startTimestamp Unix timestamp when the listing becomes active.
-     * @param _endTimestamp Unix timestamp when the listing expires.
-     * @return listingId The ID of the newly created listing.
-     */
-    function createListing(
-        address _assetContract,
-        uint256 _tokenId,
-        uint256 _quantity,
-        address _currency,
-        uint256 _pricePerToken,
-        uint256 _startTimestamp,
-        uint256 _endTimestamp
-    ) external nonReentrant returns (uint256 listingId) {
-        require(_assetContract != address(0), 'RareMarket: Zero asset contract address');
-        require(_quantity > 0, 'RareMarket: Quantity must be greater than 0');
-        require(_pricePerToken > 0, 'RareMarket: Price must be greater than 0');
-        require(_startTimestamp < _endTimestamp, 'RareMarket: Start time must be before end time');
-        require(_endTimestamp > block.timestamp, 'RareMarket: End time must be in the future');
-
-        TokenType tokenType = _getTokenType(_assetContract);
-        if (tokenType == TokenType.ERC721) {
-            require(_quantity == 1, 'RareMarket: ERC721 quantity must be 1');
-            require(IERC721(_assetContract).ownerOf(_tokenId) == msg.sender, 'RareMarket: Caller not owner of ERC721');
-        } else {
-            // TokenType.ERC1155
-            require(
-                IERC1155(_assetContract).balanceOf(msg.sender, _tokenId) >= _quantity,
-                'RareMarket: Insufficient ERC1155 balance'
-            );
-        }
-
-        _transferNFTFromUser(_assetContract, msg.sender, _tokenId, _quantity, tokenType);
-
-        listingId = ++totalListings; // Pre-increment for ID 1 onwards
-        listings[listingId] = Listing({
-            listingId: listingId,
-            listingCreator: msg.sender,
-            assetContract: _assetContract,
-            tokenId: _tokenId,
-            quantity: _quantity,
-            currency: _currency,
-            pricePerToken: _pricePerToken,
-            startTimestamp: _startTimestamp,
-            endTimestamp: _endTimestamp,
-            tokenType: tokenType,
-            status: Status.Active
-        });
-
-        emit NewListing(listingId, msg.sender, _assetContract, _tokenId, _quantity, _currency, _pricePerToken);
-        return listingId;
-    }
-
-    /**
-     * @notice Cancels an active listing.
-     * @dev Only the listing creator can cancel. NFTs are returned to the creator.
-     * @param _listingId The ID of the listing to cancel.
-     */
-    function cancelListing(uint256 _listingId) external nonReentrant {
-        Listing storage listing = listings[_listingId];
-        require(listing.status == Status.Active, 'RareMarket: Listing not active');
-        require(listing.listingCreator == msg.sender, 'RareMarket: Not listing creator');
-
-        listing.status = Status.Cancelled;
-        _transferNFTToUser(
-            listing.assetContract,
-            listing.listingCreator, // Send back to the creator
-            listing.tokenId,
-            listing.quantity,
-            listing.tokenType
-        );
-
-        emit ListingCancelled(_listingId, msg.sender);
-    }
-
-    /**
-     * @notice Buys NFTs from an active listing.
-     * @dev Buyer pays the total price, which is then distributed to the seller, royalty recipient, and platform.
-     * @param _listingId The ID of the listing to buy from.
-     * @param _quantityToBuy The quantity of tokens to purchase.
-     * @param _buyFor The address to receive the purchased NFTs. If address(0), defaults to msg.sender.
-     */
-    function buyFromListing(uint256 _listingId, uint256 _quantityToBuy, address _buyFor) external payable nonReentrant {
-        Listing storage listing = listings[_listingId];
-        require(listing.status == Status.Active, 'RareMarket: Listing not active');
-        require(block.timestamp >= listing.startTimestamp, 'RareMarket: Listing not yet started');
-        require(block.timestamp <= listing.endTimestamp, 'RareMarket: Listing expired');
-        require(_quantityToBuy > 0, 'RareMarket: Quantity must be > 0');
-        require(_quantityToBuy <= listing.quantity, 'RareMarket: Not enough quantity in listing');
-
-        address buyerActual = (_buyFor == address(0)) ? msg.sender : _buyFor;
-        require(buyerActual != address(0), 'RareMarket: Buyer cannot be zero address');
-
-        uint256 totalPrice = listing.pricePerToken * _quantityToBuy;
-        _processPayment(msg.sender, listing.currency, totalPrice);
-
-        _distributeSaleProceeds(
-            listing.listingCreator,
-            listing.assetContract,
-            listing.tokenId,
-            totalPrice,
-            listing.currency
-        );
-
-        _transferNFTToUser(listing.assetContract, buyerActual, listing.tokenId, _quantityToBuy, listing.tokenType);
-
-        listing.quantity -= _quantityToBuy;
-        if (listing.quantity == 0) {
-            listing.status = Status.Sold; // Or Inactive
-        }
-
-        emit ListingSold(_listingId, listing.listingCreator, buyerActual, _quantityToBuy, totalPrice);
-    }
-
-    // --- Auctions ---
-
-    /**
-     * @notice Creates a new auction for NFTs.
-     * @dev The caller must own the NFT(s). NFTs are transferred to this contract.
-     * @param _assetContract Address of the ERC721 or ERC1155 contract.
-     * @param _tokenId ID of the token to auction.
-     * @param _quantity Quantity to auction (must be 1 for ERC721).
-     * @param _currency Address of the ERC20 currency, or address(0) for native currency.
-     * @param _startTimestamp Unix timestamp when bidding can start.
-     * @param _endTimestamp Unix timestamp when the auction ends and can be finalized.
-     * @param _initialBid Optional initial bid to set (can be 0).
-     * @return auctionId The ID of the newly created auction.
-     */
-    function createAuction(
-        address _assetContract,
-        uint256 _tokenId,
-        uint256 _quantity,
-        address _currency,
-        uint256 _startTimestamp,
-        uint256 _endTimestamp,
-        uint256 _initialBid // Allows setting a reserve price or starting bid
-    ) external nonReentrant returns (uint256 auctionId) {
-        require(_assetContract != address(0), 'RareMarket: Zero asset contract address');
-        require(_quantity > 0, 'RareMarket: Quantity must be > 0');
-        require(_startTimestamp < _endTimestamp, 'RareMarket: Start time must be before end time');
-        require(_endTimestamp > block.timestamp, 'RareMarket: End time must be in the future');
-        // _initialBid can be 0
-
-        TokenType tokenType = _getTokenType(_assetContract);
-        if (tokenType == TokenType.ERC721) {
-            require(_quantity == 1, 'RareMarket: ERC721 quantity must be 1');
-            require(IERC721(_assetContract).ownerOf(_tokenId) == msg.sender, 'RareMarket: Caller not owner of ERC721');
-        } else {
-            // TokenType.ERC1155
-            require(
-                IERC1155(_assetContract).balanceOf(msg.sender, _tokenId) >= _quantity,
-                'RareMarket: Insufficient ERC1155 balance'
-            );
-        }
-
-        _transferNFTFromUser(_assetContract, msg.sender, _tokenId, _quantity, tokenType);
-
-        auctionId = ++totalAuctions;
-        auctions[auctionId] = Auction({
-            auctionId: auctionId,
-            creator: msg.sender,
-            assetContract: _assetContract,
-            tokenId: _tokenId,
-            quantity: _quantity,
-            currency: _currency,
-            startTimestamp: _startTimestamp,
-            endTimestamp: _endTimestamp,
-            highestBidder: address(0),
-            highestBid: _initialBid, // Set initial/reserve bid
-            tokenType: tokenType,
-            status: Status.Active
-        });
-
-        emit AuctionCreated(auctionId, msg.sender, _assetContract, _tokenId, _quantity, _currency, _endTimestamp);
-        return auctionId;
-    }
-
-    /**
-     * @notice Places a bid in an active auction.
-     * @dev Bid amount must be higher than the current highest bid. Previous bidder's funds are made available for withdrawal.
-     * @param _auctionId The ID of the auction to bid on.
-     * @param _bidAmount The amount to bid.
-     */
-    function bidInAuction(uint256 _auctionId, uint256 _bidAmount) external payable nonReentrant {
-        Auction storage auction = auctions[_auctionId];
-        require(auction.status == Status.Active, 'RareMarket: Auction not active');
-        require(block.timestamp >= auction.startTimestamp, 'RareMarket: Auction not yet started');
-        require(block.timestamp <= auction.endTimestamp, 'RareMarket: Auction has ended');
-        require(_bidAmount > auction.highestBid, 'RareMarket: Bid too low');
-
-        _processPayment(msg.sender, auction.currency, _bidAmount);
-
-        // Refund previous highest bidder
-        if (auction.highestBidder != address(0)) {
-            _addPendingWithdrawal(auction.highestBidder, auction.currency, auction.highestBid);
-        }
-
-        auction.highestBidder = msg.sender;
-        auction.highestBid = _bidAmount;
-
-        emit BidPlaced(_auctionId, msg.sender, _bidAmount);
-    }
-
-    /**
-     * @notice Finalizes a completed auction.
-     * @dev Can be called after the auction's end time. If there's a winner, funds are distributed and NFT transferred.
-     * If no bids (or bids didn't meet reserve if implemented explicitly), NFT is returned to the creator.
-     * @param _auctionId The ID of the auction to finalize.
-     */
-    function finalizeAuction(uint256 _auctionId) external nonReentrant {
-        Auction storage auction = auctions[_auctionId];
-        require(auction.status == Status.Active, 'RareMarket: Auction not active or already finalized');
-        require(block.timestamp > auction.endTimestamp, 'RareMarket: Auction has not ended yet');
-
-        auction.status = Status.Finalized; // Or Sold/Inactive
-
-        if (auction.highestBidder != address(0) && auction.highestBid > 0) {
-            // There's a winner
-            _distributeSaleProceeds(
-                auction.creator,
-                auction.assetContract,
-                auction.tokenId,
-                auction.highestBid,
-                auction.currency
-            );
-
-            _transferNFTToUser(
-                auction.assetContract,
-                auction.highestBidder,
-                auction.tokenId,
-                auction.quantity,
-                auction.tokenType
-            );
-            emit AuctionFinalized(_auctionId, auction.highestBidder, auction.creator, auction.highestBid);
-        } else {
-            // No valid bids, return NFT to creator
-            _transferNFTToUser(
-                auction.assetContract,
-                auction.creator,
-                auction.tokenId,
-                auction.quantity,
-                auction.tokenType
-            );
-            // Emitting AuctionCancelled here might be appropriate if no bids were made
-            // Or a specific "AuctionEndedWithoutSale" event
-            emit AuctionFinalized(_auctionId, address(0), auction.creator, 0); // No winner
-        }
-    }
-
-    // --- Offers ---
-
-    /**
-     * @notice Creates an offer for a specific NFT. The offeror escrows the funds.
-     * @param _assetContract Address of the ERC721 or ERC1155 contract.
-     * @param _tokenId ID of the token for which the offer is made.
-     * @param _quantity Quantity offered for (must be 1 for ERC721).
-     * @param _currency Address of the ERC20 currency, or address(0) for native currency.
-     * @param _pricePerToken Price offered per token unit.
-     * @param _expiryTimestamp Unix timestamp when the offer expires.
-     * @return offerId The ID of the newly created offer.
-     */
-    function createOffer(
-        address _assetContract,
-        uint256 _tokenId,
-        uint256 _quantity,
-        address _currency,
-        uint256 _pricePerToken,
-        uint256 _expiryTimestamp
-    ) external payable nonReentrant returns (uint256 offerId) {
-        require(_assetContract != address(0), 'RareMarket: Zero asset contract address');
-        require(_quantity > 0, 'RareMarket: Quantity must be > 0');
-        require(_pricePerToken > 0, 'RareMarket: Price must be > 0');
-        require(_expiryTimestamp > block.timestamp, 'RareMarket: Expiry must be in the future');
-
-        TokenType tokenType = _getTokenType(_assetContract); // Determine type for struct, even if not strictly validated here
-        if (tokenType == TokenType.ERC721) {
-            require(_quantity == 1, 'RareMarket: ERC721 quantity must be 1');
-        }
-
-        uint256 totalPrice = _pricePerToken * _quantity;
-        _processPayment(msg.sender, _currency, totalPrice); // Offeror pays upfront
-
-        offerId = ++totalOffers;
-        offers[offerId] = Offer({
-            offerId: offerId,
-            offeror: msg.sender,
-            assetContract: _assetContract,
-            tokenId: _tokenId,
-            quantity: _quantity,
-            currency: _currency,
-            pricePerToken: _pricePerToken,
-            expiryTimestamp: _expiryTimestamp,
-            tokenType: tokenType,
-            status: Status.Active
-        });
-
-        emit NewOffer(offerId, msg.sender, _assetContract, _tokenId, _quantity, _currency, _pricePerToken);
-        return offerId;
-    }
-
-    /**
-     * @notice Allows an offeror to cancel their own active offer before it's accepted or expired.
-     * @dev Funds are returned to the offeror.
-     * @param _offerId The ID of the offer to cancel.
-     */
-    function cancelOffer(uint256 _offerId) external nonReentrant {
-        Offer storage offer = offers[_offerId];
-        require(offer.offeror == msg.sender, 'RareMarket: Not the offeror');
-        require(offer.status == Status.Active, 'RareMarket: Offer not active');
-        // No expiry check needed here, offeror can cancel an active offer.
-
-        offer.status = Status.Cancelled;
-        uint256 totalAmountToRefund = offer.pricePerToken * offer.quantity;
-        _addPendingWithdrawal(offer.offeror, offer.currency, totalAmountToRefund);
-
-        emit OfferCancelled(_offerId, offer.offeror);
-    }
-
-    /**
-     * @notice Accepts an active offer for an NFT.
-     * @dev The caller must own the NFT(s). NFT is transferred to the offeror, and funds are distributed.
-     * @param _offerId The ID of the offer to accept.
-     */
-    function acceptOffer(uint256 _offerId) external nonReentrant {
-        Offer storage offer = offers[_offerId];
-        require(offer.status == Status.Active, 'RareMarket: Offer not active');
-        require(block.timestamp <= offer.expiryTimestamp, 'RareMarket: Offer expired');
-
-        address seller = msg.sender; // The one accepting the offer is the seller
-
-        // Verify seller owns the NFT
-        if (offer.tokenType == TokenType.ERC721) {
-            require(
-                IERC721(offer.assetContract).ownerOf(offer.tokenId) == seller,
-                'RareMarket: Seller not owner of ERC721'
-            );
-        } else {
-            // TokenType.ERC1155
-            require(
-                IERC1155(offer.assetContract).balanceOf(seller, offer.tokenId) >= offer.quantity,
-                'RareMarket: Seller has insufficient ERC1155 balance'
-            );
-        }
-
-        offer.status = Status.Sold; // Or Inactive/Finalized
-
-        uint256 totalPrice = offer.pricePerToken * offer.quantity;
-        // Funds are already in the contract from createOffer. Now distribute them.
-        _distributeSaleProceeds(seller, offer.assetContract, offer.tokenId, totalPrice, offer.currency);
-
-        // Transfer NFT from seller to offeror
-        if (offer.tokenType == TokenType.ERC721) {
-            IERC721(offer.assetContract).safeTransferFrom(seller, offer.offeror, offer.tokenId);
-        } else {
-            // TokenType.ERC1155
-            IERC1155(offer.assetContract).safeTransferFrom(
-                seller,
-                offer.offeror,
-                offer.tokenId,
-                offer.quantity,
-                '' // Empty data
-            );
-        }
-
-        emit OfferAccepted(_offerId, seller, offer.offeror);
-    }
-
-    // --- Fund Distribution and Payment ---
-
-    /**
-     * @dev Internal function to handle payment from a user to the contract.
-     * @param _payer The address paying the funds.
-     * @param _currency The currency of payment (address(0) for native).
-     * @param _amount The amount to be paid.
-     */
-    function _processPayment(address _payer, address _currency, uint256 _amount) internal {
-        if (_currency == NATIVE_CURRENCY) {
-            require(msg.value == _amount, 'RareMarket: Native currency value mismatch');
-            // Ether is now in the contract's balance
-        } else {
-            require(msg.value == 0, 'RareMarket: Native currency sent for ERC20 transaction');
-            IERC20 token = IERC20(_currency);
-            uint256 balanceBefore = token.balanceOf(address(this));
-            token.safeTransferFrom(_payer, address(this), _amount);
-            uint256 balanceAfter = token.balanceOf(address(this));
-            require(
-                balanceAfter - balanceBefore == _amount,
-                'RareMarket: ERC20 transfer amount mismatch (check for fee-on-transfer tokens)'
-            );
-        }
-    }
-
-    /**
-     * @dev Internal function to distribute sale proceeds to seller, royalty recipient, and platform.
-     * @param _seller The address of the NFT seller.
-     * @param _assetContract The address of the NFT contract.
-     * @param _tokenId The ID of the token sold.
-     * @param _totalPrice The total sale price.
-     * @param _currency The currency of the sale.
-     */
-   // In RareMarket.sol
-    function _distributeSaleProceeds(
-        address _seller,
-        address _assetContract,
-        uint256 _tokenId,
-        uint256 _totalPrice,
-        address _currency
-    ) internal {
-        require(_seller != address(0), "RareMarket: Seller cannot be zero address");
-
-        if (_totalPrice > 0) {
-            totalVolumeSoldByCollectionAndCurrency[_assetContract][_currency] += _totalPrice;
-        }
-
-        uint256 platformFeeAmount = 0;
-        if (platformFeeBps > 0 && platformFeeRecipient != address(0)) {
-            platformFeeAmount = (_totalPrice * platformFeeBps) / 10000;
-            if (platformFeeAmount > 0) {
-                _addPendingWithdrawal(platformFeeRecipient, _currency, platformFeeAmount);
-            }
-        }
-
-        uint256 remainingAfterPlatformFee = _totalPrice - platformFeeAmount;
-        require(remainingAfterPlatformFee <= _totalPrice, "RareMarket: Platform fee calc error");
-
-        uint256 sellerProceeds;
-
-    
-        if (royaltyEngineAddress != address(0) && remainingAfterPlatformFee > 0) {
-            // Query the Royalty AMM for royalty details
-            // The getRoyalty function in your Royalty AMM returns arrays.
-            // Assuming your AMM's getRoyalty logic (as previously discussed) primarily uses the first element for a single royalty setup.
-            (, uint256[] memory royaltyAmounts) = // We don't need recipients here for direct payout
-                IRoyaltyEngine(royaltyEngineAddress).getRoyalty(_assetContract, _tokenId, remainingAfterPlatformFee);
-
-            uint256 totalRoyaltyAmountDue = 0;
-            if (royaltyAmounts.length > 0) {
-                // Summing amounts if multiple, or taking amounts[0] if single royalty is standard from your AMM
-                for(uint i = 0; i < royaltyAmounts.length; i++){
-                    totalRoyaltyAmountDue += royaltyAmounts[i];
-                }
-            }
-            
-            // Ensure royalty doesn't exceed remaining amount
-            if (totalRoyaltyAmountDue > remainingAfterPlatformFee) {
-                totalRoyaltyAmountDue = remainingAfterPlatformFee;
-            }
-
-            if (totalRoyaltyAmountDue > 0) {
-                // Transfer royalty amount to the Royalty AMM to be added as liquidity
-                if (_currency == NATIVE_CURRENCY) {
-                    IRoyaltyEngine(royaltyEngineAddress).addRoyaltyAsLiquidity{value: totalRoyaltyAmountDue}(
-                        _assetContract,
-                        NATIVE_CURRENCY, // Pass address(0) for native
-                        totalRoyaltyAmountDue
-                    );
-                } else { // ERC20 Token
-                    // 1. RareMarket transfers the ERC20 tokens to the royaltyEngineAddress
-                    IERC20(_currency).safeTransfer(royaltyEngineAddress, totalRoyaltyAmountDue);
-                    // 2. RareMarket then calls addRoyaltyAsLiquidity on the AMM (with no msg.value)
-                    IRoyaltyEngine(royaltyEngineAddress).addRoyaltyAsLiquidity(
-                        _assetContract,
-                        _currency,
-                        totalRoyaltyAmountDue
-                    );
-                }
-                sellerProceeds = remainingAfterPlatformFee - totalRoyaltyAmountDue;
+        uint256 sharesIssued = 0;
+        if (initialTokenAmount > 0) {
+            if (currency == NATIVE_CURRENCY) {
+                require(msg.value == initialTokenAmount, "RoyaltyAMM: Native currency value mismatch");
             } else {
-                // No royalty due or amount is zero
-                sellerProceeds = remainingAfterPlatformFee;
+                require(msg.value == 0, "RoyaltyAMM: Native currency sent for ERC20 pool");
+                IERC20(currency).safeTransferFrom(msg.sender, address(this), initialTokenAmount);
             }
+            pool.tokenReserve += initialTokenAmount;
+            sharesIssued = initialTokenAmount;
+            pool.providerTokenShares[msg.sender] += sharesIssued;
+            pool.totalLiquidityShares += sharesIssued;
+        }
+
+        emit PoolCreated(collection, currency, msg.sender, initialTokenAmount, initialTokenIds);
+        if (initialTokenAmount > 0) {
+            emit LiquidityAdded(collection, msg.sender, currency, initialTokenAmount, sharesIssued);
+        }
+    }
+
+    function swapNFTToToken(address collection, uint256 tokenId, address currency) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+        require(pool.tokenReserve > 0, "RoyaltyAMM: Insufficient token liquidity in pool");
+        require(IERC721(collection).ownerOf(tokenId) == msg.sender, "RoyaltyAMM: Not owner of token");
+        require(!pool.isNFTInPool[tokenId], "RoyaltyAMM: NFT is already pool liquidity");
+
+        uint256 tokenReserveBefore = pool.tokenReserve;
+        uint256 nftReserveBefore = pool.nftReserve;
+
+        uint256 amountOut_gross = (tokenReserveBefore * 1) / (nftReserveBefore + 1);
+        uint256 fee = (tokenReserveBefore * SWAP_FEE_BPS) / ((nftReserveBefore + 1) * 10000);
+        uint256 amountOut_net = amountOut_gross > fee ? amountOut_gross - fee : 0;
+        require(amountOut_net > 0, "RoyaltyAMM: Net amount out is zero after fee");
+        require(pool.tokenReserve >= amountOut_net, "RoyaltyAMM: AMM insufficient token reserve for swap");
+
+        // State changes before external call
+        pool.tokenReserve -= amountOut_net;
+        pool.nftReserve += 1;
+        pool.isNFTInPool[tokenId] = true;
+        pool.poolNFTTokenIdsList.push(tokenId);
+        pool.nftTokenIdToListIndex[tokenId] = pool.poolNFTTokenIdsList.length;
+        pool.accumulatedFees += fee;
+        collectionStats[collection].totalTradingVolume += amountOut_gross;
+        collectionStats[collection].totalFeesCollected += fee;
+
+        IERC721(collection).safeTransferFrom(msg.sender, address(this), tokenId);
+        _transferCurrency(currency, msg.sender, amountOut_net);
+
+        emit SwapNFTToToken(collection, msg.sender, tokenId, currency, amountOut_net, fee);
+    }
+
+    function swapTokenToNFT(address collection, address currency, uint256 tokenIdToReceive) 
+        external 
+        payable 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+        require(pool.nftReserve > 0, "RoyaltyAMM: No NFTs in pool to swap");
+        require(pool.isNFTInPool[tokenIdToReceive], "RoyaltyAMM: Chosen NFT not in pool liquidity");
+
+        uint256 tokenReserveBefore = pool.tokenReserve;
+        uint256 nftReserveBefore = pool.nftReserve;
+        require(nftReserveBefore > 1, "RoyaltyAMM: At least two NFTs must be in pool to buy one");
+
+        uint256 amountIn_net = (tokenReserveBefore * 1) / (nftReserveBefore - 1);
+        uint256 amountIn_gross = (tokenReserveBefore * 10000) / ((nftReserveBefore - 1) * (10000 - SWAP_FEE_BPS));
+        uint256 fee = amountIn_gross - amountIn_net;
+        require(amountIn_gross > 0, "RoyaltyAMM: Gross amount in is zero");
+
+
+        // State changes before external call
+        pool.tokenReserve += amountIn_net;
+        pool.nftReserve -= 1;
+        pool.isNFTInPool[tokenIdToReceive] = false;
+        _removeTokenIdFromList(pool, tokenIdToReceive);
+        pool.accumulatedFees += fee;
+        collectionStats[collection].totalTradingVolume += amountIn_gross;
+        collectionStats[collection].totalFeesCollected += fee;
+
+        IERC721(collection).safeTransferFrom(address(this), msg.sender, tokenIdToReceive);
+
+        emit SwapTokenToNFT(collection, msg.sender, tokenIdToReceive, currency, amountIn_gross, fee);
+    }
+
+    function batchSwapNFTToToken(address collection, uint256[] calldata tokenIds, address currency, uint256 minTotalAmountOut) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(tokenIds.length > 0, "RoyaltyAMM: No token IDs provided for batch swap");
+        require(tokenIds.length <= MAX_BATCH_SIZE, "RoyaltyAMM: Too many tokens in batch");
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+        require(pool.tokenReserve > 0, "RoyaltyAMM: Pool has no token liquidity for swap");
+
+        uint256 totalAmountOutNet = 0;
+        uint256 totalFee = 0;
+  
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            
+            require(!pool.isNFTInPool[tokenIds[i]], "RoyaltyAMM: A token in batch is already pool liquidity");
+
+            uint256 amountOutGross = (pool.tokenReserve * 1) / (pool.nftReserve + 1);
+            uint256 feeSingle = (pool.tokenReserve * SWAP_FEE_BPS) / ((pool.nftReserve + 1) * 10000);
+            uint256 amountOutNetSingle = amountOutGross > feeSingle ? amountOutGross - feeSingle : 0;
+
+            require(pool.tokenReserve >= amountOutNetSingle, "RoyaltyAMM: Pool token reserve depleted for a sub-swap");
+
+            // State changes before external call
+            if (amountOutNetSingle > 0) {
+                pool.tokenReserve -= amountOutNetSingle;
+            }
+            pool.nftReserve += 1;
+            pool.isNFTInPool[tokenIds[i]] = true;
+            pool.poolNFTTokenIdsList.push(tokenIds[i]);
+            pool.nftTokenIdToListIndex[tokenIds[i]] = pool.poolNFTTokenIdsList.length;
+            pool.accumulatedFees += feeSingle;
+            collectionStats[collection].totalTradingVolume += amountOutGross;
+            collectionStats[collection].totalFeesCollected += feeSingle;
+
+            totalAmountOutNet += amountOutNetSingle;
+            totalFee += feeSingle;
+
+        }
+
+        require(totalAmountOutNet >= minTotalAmountOut, "RoyaltyAMM: Slippage protection; less than min expected output");
+
+        if (totalAmountOutNet > 0) {
+            _transferCurrency(currency, msg.sender, totalAmountOutNet);
+        }
+
+        emit BatchSwapNFTToToken(collection, msg.sender, tokenIds, currency, totalAmountOutNet, totalFee);
+    }
+
+    function addLiquidity(address collection, address currency, uint256 amount) 
+        external 
+        payable 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(amount > 0, "RoyaltyAMM: Amount must be positive");
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+
+        if (currency == NATIVE_CURRENCY) {
+            require(msg.value == amount, "RoyaltyAMM: Native currency value mismatch");
         } else {
-            // No royalty engine set or no amount left for royalties
-            sellerProceeds = remainingAfterPlatformFee;
+            require(msg.value == 0, "RoyaltyAMM: Native currency sent for ERC20 pool");
+            IERC20(currency).safeTransferFrom(msg.sender, address(this), amount);
         }
-   
-        require(sellerProceeds <= remainingAfterPlatformFee, "RareMarket: Seller proceeds calc error");
 
-        if (sellerProceeds > 0) {
-            _addPendingWithdrawal(_seller, _currency, sellerProceeds);
-        }
-    }
-
-    // --- NFT Handling ---
-
-    /**
-     * @dev Determines if a contract is likely ERC721 or ERC1155 based on interface support.
-     * Prefers ERC721 if both are supported (unlikely but possible with misbehaving contracts).
-     * @param _contractAddress Address of the token contract.
-     * @return TokenType (ERC721 or ERC1155). Reverts if neither.
-     */
-    function _getTokenType(address _contractAddress) internal view returns (TokenType) {
-        bool supportsERC721 = ERC165Utils.supportsInterface(_contractAddress, type(IERC721).interfaceId);
-        bool supportsERC1155 = ERC165Utils.supportsInterface(_contractAddress, type(IERC1155).interfaceId);
-
-        if (supportsERC721) {
-            return TokenType.ERC721;
-        }
-        if (supportsERC1155) {
-            return TokenType.ERC1155;
-        }
-        revert('RareMarket: Contract is not ERC721 or ERC1155');
-    }
-
-    /**
-     * @dev Internal: Transfers NFT from a user to this contract.
-     * Caller (user) must have approved this contract or be the owner.
-     */
-    function _transferNFTFromUser(
-        address _assetContract,
-        address _from,
-        uint256 _tokenId,
-        uint256 _quantity,
-        TokenType _tokenType
-    ) internal {
-        if (_tokenType == TokenType.ERC721) {
-            IERC721(_assetContract).safeTransferFrom(_from, address(this), _tokenId);
+        uint256 sharesIssued;
+        if (pool.totalLiquidityShares == 0 || pool.tokenReserve == 0) {
+            sharesIssued = amount;
         } else {
-            // TokenType.ERC1155
-            IERC1155(_assetContract).safeTransferFrom(_from, address(this), _tokenId, _quantity, ''); // Empty data
+            sharesIssued = (amount * pool.totalLiquidityShares) / pool.tokenReserve;
         }
+        require(sharesIssued > 0, "RoyaltyAMM: Shares issued must be positive");
+
+        pool.tokenReserve += amount;
+        pool.providerTokenShares[msg.sender] += sharesIssued;
+        pool.totalLiquidityShares += sharesIssued;
+
+        emit LiquidityAdded(collection, msg.sender, currency, amount, sharesIssued);
     }
 
-    /**
-     * @dev Internal: Transfers NFT from this contract to a user.
-     */
-    function _transferNFTToUser(
-        address _assetContract,
-        address _to,
-        uint256 _tokenId,
-        uint256 _quantity,
-        TokenType _tokenType
-    ) internal {
-        require(_to != address(0), 'RareMarket: Cannot transfer NFT to zero address');
-        if (_tokenType == TokenType.ERC721) {
-            IERC721(_assetContract).safeTransferFrom(address(this), _to, _tokenId);
+    function depositNFTsForSwap(address collection, address currency, uint256[] calldata tokenIds) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(tokenIds.length > 0, "RoyaltyAMM: No token IDs provided");
+        require(tokenIds.length <= MAX_BATCH_SIZE, "RoyaltyAMM: Too many tokens in batch");
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+            require(tokenIds.length <= 100, "Too many tokens");
+            require(!pool.isNFTInPool[tokenId], "RoyaltyAMM: NFT already in pool");
+
+
+            pool.isNFTInPool[tokenId] = true;
+            pool.poolNFTTokenIdsList.push(tokenId);
+            pool.nftTokenIdToListIndex[tokenId] = pool.poolNFTTokenIdsList.length;
+            pool.nftReserve += 1;
+        }
+        emit NFTLiquidityAdded(collection, msg.sender, currency, tokenIds);
+    }
+
+    function removeLiquidity(address collection, address currency, uint256 shareAmount) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+        require(pool.providerTokenShares[msg.sender] >= shareAmount, "RoyaltyAMM: Insufficient shares");
+        require(pool.totalLiquidityShares > 0, "RoyaltyAMM: No total liquidity shares in pool");
+        require(shareAmount > 0, "RoyaltyAMM: Cannot remove zero shares");
+
+        uint256 tokenAmountToWithdraw = (shareAmount * pool.tokenReserve) / pool.totalLiquidityShares;
+        uint256 feeShareToWithdraw = (shareAmount * pool.accumulatedFees) / pool.totalLiquidityShares;
+
+        require(tokenAmountToWithdraw > 0 || feeShareToWithdraw > 0, "RoyaltyAMM: No value to withdraw");
+
+        pool.providerTokenShares[msg.sender] -= shareAmount;
+        pool.totalLiquidityShares -= shareAmount;
+        pool.tokenReserve -= tokenAmountToWithdraw;
+        pool.accumulatedFees -= feeShareToWithdraw;
+
+        uint256 totalWithdraw = tokenAmountToWithdraw + feeShareToWithdraw;
+        if (totalWithdraw > 0) {
+            _transferCurrency(currency, msg.sender, totalWithdraw);
+        }
+
+        emit LiquidityRemoved(collection, msg.sender, currency, tokenAmountToWithdraw, shareAmount, feeShareToWithdraw);
+    }
+
+    function withdrawFees(address collection, address currency) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+    {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = _getPool(collection, currency);
+        require(pool.totalLiquidityShares > 0, "RoyaltyAMM: No total liquidity in pool");
+
+        uint256 providerShares = pool.providerTokenShares[msg.sender];
+        require(providerShares > 0, "RoyaltyAMM: No shares in this pool for provider");
+
+        uint256 feeShare = (providerShares * pool.accumulatedFees) / pool.totalLiquidityShares;
+        require(feeShare > 0, "RoyaltyAMM: No fees to withdraw for provider");
+
+        pool.accumulatedFees -= feeShare;
+        _transferCurrency(currency, msg.sender, feeShare);
+        emit FeesWithdrawn(collection, msg.sender, currency, feeShare);
+    }
+
+    function getNFTPriceInPool(address collection, address currency) public view returns (uint256 netAmountOut, uint256 feeAmount) {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        LiquidityPool storage pool = collectionPools[collection][currency];
+        uint256 tokenReserve = pool.tokenReserve;
+        uint256 nftReserve = pool.nftReserve;
+
+        if (tokenReserve == 0) {
+            return (0, 0);
+        }
+
+        uint256 amountOut_gross = (tokenReserve * 1) / (nftReserve + 1);
+        if (amountOut_gross == 0) {
+            return (0, 0);
+        }
+        feeAmount = (tokenReserve * SWAP_FEE_BPS) / ((nftReserve + 1) * 10000);
+        netAmountOut = amountOut_gross > feeAmount ? amountOut_gross - feeAmount : 0;
+    }
+
+    function getPools() external view returns (PoolDetail[] memory) {
+        PoolDetail[] memory allDetails = new PoolDetail[](allPoolIdentifiers.length);
+        for (uint256 i = 0; i < allPoolIdentifiers.length; i++) {
+            PoolIdentifier storage pId = allPoolIdentifiers[i];
+            LiquidityPool storage pool = collectionPools[pId.collection][pId.currency];
+
+            (uint256 priceToBuy, uint256 priceToSell) = getNFTPriceInPool(pId.collection, pId.currency);
+
+            uint256[] memory currentNftTokenIds = new uint256[](pool.poolNFTTokenIdsList.length);
+            for (uint256 j = 0; j < pool.poolNFTTokenIdsList.length; j++) {
+                currentNftTokenIds[j] = pool.poolNFTTokenIdsList[j];
+            }
+
+            allDetails[i] = PoolDetail({
+                collectionAddress: pId.collection,
+                currencyAddress: pId.currency,
+                tokenReserve: pool.tokenReserve,
+                nftReserveCount: pool.nftReserve,
+                totalLiquidityShares: pool.totalLiquidityShares,
+                accumulatedFees: pool.accumulatedFees,
+                nftTokenIdsInPool: currentNftTokenIds,
+                priceToBuyNFT: priceToBuy,
+                priceToSellNFT: priceToSell
+            });
+        }
+        return allDetails;
+    }
+
+    function getPoolNFTs(address collection, address currency) external view returns (uint256[] memory) {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        return collectionPools[collection][currency].poolNFTTokenIdsList;
+    }
+
+    function _getPool(address collection, address currency) internal view returns (LiquidityPool storage) {
+        require(collection != address(0), "RoyaltyAMM: Zero collection address");
+        require(currency != address(0), "RoyaltyAMM: Zero currency address");
+        require(poolIdentifierIndex[collection][currency] != 0, "RoyaltyAMM: Pool not found");
+        return collectionPools[collection][currency];
+    }
+
+    function _transferCurrency(address currency, address recipient, uint256 amount) internal nonReentrant {
+        if (amount == 0) return;
+        require(recipient != address(0), "RoyaltyAMM: Zero recipient address");
+        if (currency == NATIVE_CURRENCY) {
+            payable(recipient).sendValue(amount);
         } else {
-            // TokenType.ERC1155
-            IERC1155(_assetContract).safeTransferFrom(address(this), _to, _tokenId, _quantity, ''); // Empty data
+            IERC20(currency).safeTransfer(recipient, amount);
         }
     }
 
-    // --- Withdrawals ---
+    function _removeTokenIdFromList(LiquidityPool storage pool, uint256 tokenIdToRemove) internal {
+        uint256 listIndexToRemoveWithBase = pool.nftTokenIdToListIndex[tokenIdToRemove];
+        require(listIndexToRemoveWithBase > 0, "RoyaltyAMM: TokenId not in list map for removal");
+        uint256 listIndexToRemove = listIndexToRemoveWithBase - 1;
 
-    /**
-     * @dev Adds an amount to a user's pending withdrawal balance for a specific currency.
-     * @param _user The address of the user.
-     * @param _currency The currency (address(0) for native, ERC20 address otherwise).
-     * @param _amount The amount to add.
-     */
-    function _addPendingWithdrawal(address _user, address _currency, uint256 _amount) internal {
-        if (_amount == 0) return; // No-op for zero amount
-        require(_user != address(0), 'RareMarket: Cannot add pending withdrawal for zero address');
+        uint256 listLength = pool.poolNFTTokenIdsList.length;
+        require(listIndexToRemove < listLength, "RoyaltyAMM: Index out of bounds for NFT list");
 
-        if (_currency == NATIVE_CURRENCY) {
-            pendingNativeWithdrawals[_user] += _amount;
-        } else {
-            pendingErc20Withdrawals[_user][_currency] += _amount;
+        if (listIndexToRemove < listLength - 1) {
+            uint256 lastTokenId = pool.poolNFTTokenIdsList[listLength - 1];
+            pool.poolNFTTokenIdsList[listIndexToRemove] = lastTokenId;
+            pool.nftTokenIdToListIndex[lastTokenId] = listIndexToRemove + 1;
         }
+        pool.poolNFTTokenIdsList.pop();
+        delete pool.nftTokenIdToListIndex[tokenIdToRemove];
     }
 
-    /**
-     * @notice Withdraws pending native currency (e.g., CORE) for the caller.
-     */
-    function withdrawNativeCurrency() external nonReentrant {
-        uint256 amount = pendingNativeWithdrawals[msg.sender];
-        require(amount > 0, 'RareMarket: No native currency to withdraw');
-
-        pendingNativeWithdrawals[msg.sender] = 0;
-        payable(msg.sender).sendValue(amount); // Using OpenZeppelin's sendValue for safety
-
-        emit FundsWithdrawn(msg.sender, NATIVE_CURRENCY, amount);
-    }
-
-    /**
-     * @notice Withdraws pending ERC20 tokens for the caller.
-     * @param _tokenContract The address of the ERC20 token to withdraw.
-     */
-    function withdrawErc20Token(address _tokenContract) external nonReentrant {
-        require(_tokenContract != NATIVE_CURRENCY, 'RareMarket: Use withdrawNativeCurrency for native currency');
-        require(_tokenContract != address(0), 'RareMarket: Invalid token address');
-
-        uint256 amount = pendingErc20Withdrawals[msg.sender][_tokenContract];
-        require(amount > 0, 'RareMarket: No such ERC20 tokens to withdraw');
-
-        pendingErc20Withdrawals[msg.sender][_tokenContract] = 0;
-        IERC20(_tokenContract).safeTransfer(msg.sender, amount);
-
-        emit FundsWithdrawn(msg.sender, _tokenContract, amount);
-    }
-
-    // --- Receiver Interfaces (for this contract to receive NFTs) ---
-
-    /**
-     * @dev See {IERC721Receiver-onERC721Received}.
-     * This function is called when an ERC721 token is `safeTransferFrom`'d to this contract.
-     * It allows the contract to accept ERC721 tokens.
-     * It is not meant to be called directly by users for marketplace operations like listing.
-     */
-    function onERC721Received(
-        address /* operator */,
-        address /* from */,
-        uint256 /* tokenId */,
-        bytes calldata /* data */
-    ) external pure override returns (bytes4) {
+    function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
 
-    /**
-     * @dev See {IERC1155Receiver-onERC1155Received}.
-     * Allows the contract to accept a single ERC1155 token type.
-     */
     function onERC1155Received(
-        address /* operator */,
-        address /* from */,
-        uint256 /* id */,
-        uint256 /* value */,
-        bytes calldata /* data */
+        address,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
     ) external pure override returns (bytes4) {
         return IERC1155Receiver.onERC1155Received.selector;
     }
 
-    /**
-     * @dev See {IERC1155Receiver-onERC1155BatchReceived}.
-     * Allows the contract to accept multiple ERC1155 token types.
-     */
     function onERC1155BatchReceived(
-        address /* operator */,
-        address /* from */,
-        uint256[] calldata /* ids */,
-        uint256[] calldata /* values */,
-        bytes calldata /* data */
-    ) external pure override returns (bytes4) {
+        address,
+        address,
+        uint256[] memory,
+        uint256[] memory,
+        bytes memory
+    ) public pure override returns (bytes4) {
         return IERC1155Receiver.onERC1155BatchReceived.selector;
     }
 
-    /**
-     * @dev See {IERC165-supportsInterface}.
-     */
     function supportsInterface(bytes4 interfaceId) public view virtual override(AccessControl, IERC165) returns (bool) {
         return
             interfaceId == type(IERC721Receiver).interfaceId ||
             interfaceId == type(IERC1155Receiver).interfaceId ||
+            interfaceId == 0x2a55205a || // EIP-2981
             super.supportsInterface(interfaceId);
-    }
-
-    /**
-     * @notice Gets the current floor price for a specific collection in a specific currency.
-     * @dev Iterates through all created listings. This can be gas-intensive if `totalListings` is very large.
-     * Considers only active listings that have started, not ended, and match the asset and currency.
-     * "Floor price" here means the lowest `pricePerToken` among such listings.
-     * @param _assetContract The address of the NFT collection contract.
-     * @param _currency The currency (address(0) for native) for which to find the floor price.
-     * @return floorPrice The lowest `pricePerToken` for an active listing. Returns `type(uint256).max` if no suitable active listing is found.
-     */
-    function getCollectionFloorPrice(
-        address _assetContract,
-        address _currency
-    ) external view returns (uint256 floorPrice) {
-        floorPrice = type(uint256).max; // Initialize with the highest possible value
-        uint256 currentTotalListings = totalListings; // Cache totalListings to avoid re-reading in loop
-
-        // Iterate from listingId 1 up to the total number of listings created
-        for (uint256 i = 1; i <= currentTotalListings; i++) {
-            Listing storage listing = listings[i]; // Get a reference to the listing
-
-            // Check if the listing is for the correct collection and currency
-            if (listing.assetContract == _assetContract && listing.currency == _currency) {
-                // Check if the listing is currently active
-                if (
-                    listing.status == Status.Active &&
-                    block.timestamp >= listing.startTimestamp &&
-                    block.timestamp <= listing.endTimestamp &&
-                    listing.pricePerToken > 0 // Ensure the price is valid
-                ) {
-                    // If this active listing's price is lower than the current floor, update the floor
-                    if (listing.pricePerToken < floorPrice) {
-                        floorPrice = listing.pricePerToken;
-                    }
-                }
-            }
-        }
-
-        // If no active listing was found matching the criteria, floorPrice will remain type(uint256).max
-        return floorPrice;
-    }
-
-    /**
-     * @notice Gets the total sales volume for a specific collection in a specific currency.
-     * @dev Volume is accumulated from all successful sales (direct buys, auction finalizations, accepted offers).
-     * @param _assetContract The address of the NFT collection contract.
-     * @param _currency The currency (address(0) for native) for which to fetch the volume.
-     * @return volume The total volume transacted for this collection in the specified currency.
-     */
-    function getCollectionVolume(address _assetContract, address _currency) external view returns (uint256 volume) {
-        return totalVolumeSoldByCollectionAndCurrency[_assetContract][_currency];
-    }
-
-      /**
-     * @notice Returns the price per token for a specific NFT listing.
-     * @param _listingId The unique ID of the listing.
-     * @param _tokenId The ID of the token in the listing (for validation).
-     * @param _assetContract The address of the NFT contract (for validation).
-     * @return price The price per token of the NFT as specified in the listing.
-     */
-    function getNFTPrice(
-        uint256 _listingId,
-        uint256 _tokenId,
-        address _assetContract
-    ) external view returns (uint256 price) {
-        Listing storage listing = listings[_listingId];
-
-        require(listing.listingId != 0, "RareMarket: Listing not found"); // Check if listing ID corresponds to an existing listing
-        require(listing.status == Status.Active, "RareMarket: Listing not active");
-        require(listing.assetContract == _assetContract, "RareMarket: Asset contract mismatch for listing ID");
-        require(listing.tokenId == _tokenId, "RareMarket: Token ID mismatch for listing ID");
-
-        return listing.pricePerToken;
-    }
-     /**
-     * @notice Returns up to 100 of the most recent active NFT listings.
-     * @dev This function iterates backwards from the latest listing ID, stopping once 100 active
-     * listings are found or all listings have been checked. This is efficient for large numbers of listings.
-     * @return allListings An array of up to 100 Listing structs, representing the latest active listings.
-     */
-    function getAllListings() external view returns (Listing[] memory) {
-        uint256 MAX_ITEMS = 100;
-        Listing[] memory latestActiveListings = new Listing[](MAX_ITEMS);
-        uint256 currentCount = 0;
-
-        // Iterate backwards from the latest listing ID to get the most recent ones first
-        for (uint256 i = totalListings; i >= 1; i--) {
-            Listing storage listing = listings[i];
-
-            // Check if the listing exists and is currently active
-            if (listing.listingId != 0 && listing.status == Status.Active) {
-                latestActiveListings[currentCount] = listing; // Copy the entire struct
-                currentCount++;
-
-                // Stop if we have collected the maximum number of items
-                if (currentCount == MAX_ITEMS) {
-                    break;
-                }
-            }
-        }
-
-        // Return a dynamically sized array with only the found active listings
-        Listing[] memory finalListings = new Listing[](currentCount);
-        for (uint256 i = 0; i < currentCount; i++) {
-            finalListings[i] = latestActiveListings[i];
-        }
-
-        return finalListings;
-    }
-
-     /**
-     * @notice Retrieves the number of active listings for a specific collection contract.
-     * @param _collectionAddress The address of the collection contract.
-     * @return The count of active listings for the specified collection.
-     */
-    function getCollectionListingCount(address _collectionAddress) public view returns (uint256) {
-        require(_collectionAddress != address(0), "RareMarket: Zero address for collection");
-        uint256 count = 0;
-        // Iterate through all potential listing IDs
-        for (uint256 i = 1; i <= totalListings; i++) {
-            // Check if the listing is active and belongs to the specified collection
-            if (listings[i].status == Status.Active && listings[i].assetContract == _collectionAddress) {
-                count++;
-            }
-        }
-        return count;
     }
 }
